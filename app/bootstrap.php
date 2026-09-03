@@ -1260,6 +1260,20 @@ body.home-lock{height:100svh;overflow:hidden}
 #site-menu:checked~.mobile-panel{display:block}
 .icon-close{display:none}
 .mobile-panel{display:none}
+.site-nav-link{position:relative;display:inline-flex;align-items:center;gap:.4rem;padding:.35rem 0;font-size:.84rem;font-weight:600;letter-spacing:.01em;color:#78716c;text-decoration:none;transition:color .22s ease}
+.site-nav-link:hover,.site-nav-link:focus-visible{color:#1c1917}
+.site-nav-link::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1.5px;border-radius:999px;background:#1c1917;transform:scaleX(0);transform-origin:left center;transition:transform .28s cubic-bezier(.22,1,.36,1)}
+.site-nav-link:hover::after,.site-nav-link:focus-visible::after{transform:scaleX(1)}
+.site-nav-ico{width:1rem;height:1rem;opacity:.7;transition:opacity .22s ease,transform .28s cubic-bezier(.22,1,.36,1)}
+.site-nav-link:hover .site-nav-ico{opacity:1;transform:translateY(-1px)}
+.mobile-nav-link{display:flex;align-items:center;gap:.85rem;border-radius:1rem;padding:.9rem 1rem;font-size:.98rem;font-weight:600;color:#1c1917;text-decoration:none;transition:background .2s ease,transform .2s ease}
+.mobile-nav-link:hover{background:#f5f5f4}
+.mobile-nav-link:active{transform:scale(.99)}
+.mobile-nav-ico{display:grid;place-items:center;width:2.25rem;height:2.25rem;border-radius:.85rem;background:#1c1917;color:#fafaf9;flex-shrink:0}
+.mobile-nav-meta{display:block;margin-top:.15rem;font-size:.72rem;font-weight:600;color:#a8a29e}
+@media (prefers-reduced-motion:reduce){
+  .site-nav-link::after,.site-nav-ico,.mobile-nav-link{transition:none}
+}
 .clean-home{height:calc(100svh - 4.25rem);display:grid;grid-template-rows:minmax(0,1.08fr) minmax(0,1fr);grid-template-areas:"visual" "copy";background:#f7f6f3;overflow:hidden}
 .clean-visual{grid-area:visual;position:relative;min-height:0;overflow:hidden;background:#ebe8e2}
 .clean-visual-img{width:100%;height:100%;object-fit:cover;object-position:center 28%;display:block;animation:clean-in 1s ease both}
@@ -1338,12 +1352,30 @@ body.home-lock{height:100svh;overflow:hidden}
             $authMobile='<a href="'.$this->url($portal).'" class="block rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800">'.$portalLabel.'</a><a href="'.$this->url('/logout').'" class="block rounded-2xl bg-stone-950 px-4 py-3 text-center text-sm font-semibold text-white">Log out</a>';
         }
 
-        $linkClass = 'text-sm font-semibold text-stone-600 hover:text-stone-950 transition';
-        $navLink=function(string $href,string $label) use ($linkClass){
-            return '<a href="'.$href.'" class="'.$linkClass.'">'.$label.'</a>';
+        $navIcon = function(string $kind): string {
+            if ($kind === 'home') {
+                return '<svg class="site-nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5Z"/></svg>';
+            }
+            if ($kind === 'packages') {
+                return '<svg class="site-nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 7.5h16M7 4.5h10M6 7.5v10.5A1.5 1.5 0 0 0 7.5 19.5h9a1.5 1.5 0 0 0 1.5-1.5V7.5"/><path d="M10 11.5h4M10 15h4"/></svg>';
+            }
+            return str_replace('class="h-5 w-5"', 'class="site-nav-ico"', $this->categoryIcon($kind, 'h-5 w-5'));
         };
-        $mobileLink=function(string $href,string $label){
-            return '<a href="'.$href.'" class="block rounded-2xl px-4 py-3 text-base font-semibold text-stone-800 hover:bg-stone-100">'.$label.'</a>';
+
+        $navLink = function(string $href, string $label, string $kind = '') use ($navIcon) {
+            $ico = $kind !== '' ? $navIcon($kind) : '';
+            return '<a href="'.$href.'" class="site-nav-link">'.$ico.'<span>'.$label.'</span></a>';
+        };
+
+        $mobileNav = function(string $href, string $label, string $meta, string $kind) {
+            if ($kind === 'packages') {
+                $ico = '<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7.5h16M7 4.5h10M6 7.5v10.5A1.5 1.5 0 0 0 7.5 19.5h9a1.5 1.5 0 0 0 1.5-1.5V7.5"/><path d="M10 11.5h4M10 15h4"/></svg>';
+            } elseif ($kind === 'home') {
+                $ico = '<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5Z"/></svg>';
+            } else {
+                $ico = $this->categoryIcon($kind, 'h-5 w-5');
+            }
+            return '<a href="'.$href.'" class="mobile-nav-link"><span class="mobile-nav-ico">'.$ico.'</span><span><span>'.$label.'</span><span class="mobile-nav-meta">'.$meta.'</span></span></a>';
         };
 
         $logo='<a href="'.$homeUrl.'" class="group flex items-center gap-3 min-w-0">
@@ -1361,11 +1393,10 @@ body.home-lock{height:100svh;overflow:hidden}
             <div class="relative flex h-[4.25rem] items-center justify-between gap-4">
               '.$logo.'
               <nav class="hidden lg:flex items-center gap-7" aria-label="Primary">
-                '.$navLink($homeUrl,'Home').'
-                '.$navLink($wedding,'Wedding').'
-                '.$navLink($baby,'Baby').'
-                '.$navLink($studio,'Studio').'
-                '.$navLink($packages,'Packages').'
+                '.$navLink($wedding,'Weddings','wedding').'
+                '.$navLink($baby,'Baby days','baby').'
+                '.$navLink($studio,'Studio','studio').'
+                '.$navLink($packages,'Browse all','packages').'
               </nav>
               <div class="flex items-center gap-3">
                 <a href="tel:'.$phoneHref.'" class="lg:hidden grid h-10 w-10 place-items-center rounded-full border border-stone-200 bg-white text-stone-700" aria-label="Call studio">
@@ -1379,11 +1410,11 @@ body.home-lock{height:100svh;overflow:hidden}
                 </label>
                 <div class="mobile-panel absolute left-0 right-0 top-[calc(100%+0.75rem)] z-50 rounded-[1.5rem] border border-stone-200 bg-white p-3 shadow-xl shadow-stone-900/10 lg:hidden">
                   <nav class="space-y-1" aria-label="Mobile">
-                    '.$mobileLink($homeUrl,'Home').'
-                    '.$mobileLink($wedding,'Wedding & Engagement').'
-                    '.$mobileLink($baby,'Baby Dedication & Christening').'
-                    '.$mobileLink($studio,'Studio Shoot').'
-                    '.$mobileLink($packages,'All packages').'
+                    '.$mobileNav($homeUrl,'Home','Studio overview','home').'
+                    '.$mobileNav($wedding,'Weddings','Engagements & celebrations','wedding').'
+                    '.$mobileNav($baby,'Baby days','Dedication & christening','baby').'
+                    '.$mobileNav($studio,'Studio','Portrait sessions','studio').'
+                    '.$mobileNav($packages,'Browse all','Every package in one place','packages').'
                   </nav>
                   <div class="mt-3 grid gap-2 border-t border-stone-100 pt-3">'.$authMobile.'</div>
                   <a href="tel:'.$phoneHref.'" class="mt-3 flex items-center justify-center gap-2 rounded-2xl bg-stone-100 px-4 py-3 text-sm font-semibold text-stone-800">Call '.$phone.'</a>
