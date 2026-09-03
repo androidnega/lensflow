@@ -59,6 +59,7 @@ final class App
                 '/admin/clients' => 'adminClients',
                 '/admin/reports' => 'adminReports',
                 '/admin/settings' => 'adminSettings',
+                '/admin/slides' => 'adminSlides',
             ],
             'POST' => [
                 '/register' => 'register',
@@ -77,6 +78,9 @@ final class App
                 '/admin/coupon-save' => 'saveCoupon',
                 '/admin/coupon-toggle' => 'toggleCoupon',
                 '/admin/settings' => 'saveSettings',
+                '/admin/slide-upload' => 'uploadHomeSlide',
+                '/admin/slide-delete' => 'deleteHomeSlide',
+                '/admin/slide-move' => 'moveHomeSlide',
             ],
         ];
 
@@ -240,6 +244,15 @@ CREATE TABLE IF NOT EXISTS timeline_templates (
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS home_slides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stored_name TEXT NOT NULL,
+    original_name TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
 SQL;
         $this->db->exec($schema);
         $this->ensureColumn('packages', 'category', "category TEXT NOT NULL DEFAULT 'wedding'");
@@ -283,6 +296,7 @@ SQL;
         foreach ($defaults as $k => $v) $stmt->execute([$k,$v]);
 
         $this->seedTimelineTemplates();
+        $this->seedHomeSlides();
     }
 
     private function seedCataloguePackages(): void
@@ -327,6 +341,30 @@ SQL;
         }
     }
 
+    private function seedHomeSlides(): void
+    {
+        $count = (int)$this->db->query("SELECT COUNT(*) FROM home_slides")->fetchColumn();
+        if ($count > 0) return;
+        $dir = __DIR__.'/../assets/slides';
+        if (!is_dir($dir)) mkdir($dir, 0775, true);
+        $now = $this->now();
+        $seeds = [
+            ['gown.jpg', 'Wedding gown'],
+            ['couple.jpg', 'Couple portrait'],
+            ['bridal-party.jpg', 'Bridal party'],
+        ];
+        $stmt = $this->db->prepare("INSERT INTO home_slides (stored_name,original_name,sort_order,active,created_at) VALUES (?,?,?,1,?)");
+        foreach ($seeds as $i => [$file, $label]) {
+            if (!is_file($dir.'/'.$file)) continue;
+            $stmt->execute([$file, $label, $i + 1, $now]);
+        }
+    }
+
+    private function homeSlides(): array
+    {
+        return $this->db->query("SELECT * FROM home_slides WHERE active=1 ORDER BY sort_order ASC, id ASC")->fetchAll();
+    }
+
     private function packageCategoryMeta(): array
     {
         return [
@@ -367,15 +405,16 @@ SQL;
         $phone = htmlspecialchars($this->config['momo_number'] ?? '0257940791');
         $phoneHref = preg_replace('/\s+/', '', $this->config['momo_number'] ?? '0257940791');
         $meta = $this->packageCategoryMeta();
-        $slides = [
-            $this->url('/assets/slide-1.jpg'),
-            $this->url('/assets/slide-2.jpg'),
-            $this->url('/assets/slide-3.jpg'),
-        ];
+        $slides = $this->homeSlides();
         $slideHtml = '';
-        foreach ($slides as $idx => $src) {
+        foreach ($slides as $idx => $slide) {
+            $src = htmlspecialchars($this->url('/assets/slides/'.$slide['stored_name']));
             $prio = $idx === 0 ? ' fetchpriority="high"' : ' loading="lazy"';
-            $slideHtml .= '<figure class="clean-slide" style="--i:'.$idx.'"><img src="'.htmlspecialchars($src).'" alt="" width="1024" height="1280" decoding="async"'.$prio.'></figure>';
+            $active = $idx === 0 ? ' is-active' : '';
+            $slideHtml .= '<figure class="clean-slide'.$active.'" data-slide><img src="'.$src.'" alt="" width="1024" height="1280" decoding="async"'.$prio.'></figure>';
+        }
+        if ($slideHtml === '') {
+            $slideHtml = '<figure class="clean-slide is-active" data-slide><div class="clean-slide-empty"></div></figure>';
         }
 
         $cats = '';
@@ -421,7 +460,21 @@ SQL;
               <a href="'.$this->url('/login').'">Client login</a>
             </p>
           </div>
-        </section>';
+        </section>
+        <script>
+        (() => {
+          const slides = Array.from(document.querySelectorAll("[data-slide]"));
+          if (slides.length < 2) return;
+          let i = 0;
+          const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          if (reduce) return;
+          setInterval(() => {
+            slides[i].classList.remove("is-active");
+            i = (i + 1) % slides.length;
+            slides[i].classList.add("is-active");
+          }, 6500);
+        })();
+        </script>';
         $this->render('Home', $body, ['home' => true]);
     }
 
@@ -1150,6 +1203,137 @@ SQL;
         $this->redirect('/admin/settings');
     }
 
+    private function adminSlides(): void
+    {
+        $this->requireRole('admin');
+        $rows = '';
+        foreach ($this->homeSlidesAll() as $s) {
+            $src = htmlspecialchars($this->url('/assets/slides/'.$s['stored_name']));
+            $rows .= '<div class="rounded-2xl border border-stone-200 bg-white p-3 flex gap-3 items-center">
+              <img src="'.$src.'" alt="" class="h-20 w-16 rounded-xl object-cover object-top bg-stone-100">
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-bold truncate">'.htmlspecialchars($s['original_name'] ?: $s['stored_name']).'</p>
+                <p class="text-xs text-stone-500 mt-0.5">Order '.$s['sort_order'].((int)$s['active'] ? '' : ' · hidden').'</p>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <form method="post" action="'.$this->url('/admin/slide-move').'">'.$this->csrfField().'<input type="hidden" name="id" value="'.$s['id'].'"><input type="hidden" name="dir" value="up"><button class="rounded-lg border border-stone-200 px-2.5 py-1 text-[11px] font-bold">Up</button></form>
+                  <form method="post" action="'.$this->url('/admin/slide-move').'">'.$this->csrfField().'<input type="hidden" name="id" value="'.$s['id'].'"><input type="hidden" name="dir" value="down"><button class="rounded-lg border border-stone-200 px-2.5 py-1 text-[11px] font-bold">Down</button></form>
+                  <form method="post" action="'.$this->url('/admin/slide-delete').'" onsubmit="return confirm(\'Remove this slide?\')">'.$this->csrfField().'<input type="hidden" name="id" value="'.$s['id'].'"><button class="rounded-lg bg-red-50 px-2.5 py-1 text-[11px] font-bold text-red-700">Delete</button></form>
+                </div>
+              </div>
+            </div>';
+        }
+        if ($rows === '') $rows = '<p class="text-sm text-stone-500">No homepage slides yet. Upload a photo to start the slideshow.</p>';
+        $body = '<div class="grid lg:grid-cols-[1.1fr_.9fr] gap-4">
+          <div class="space-y-3">'.$rows.'</div>
+          <div class="rounded-2xl border border-stone-200 bg-white p-4">
+            <h2 class="font-bold text-stone-950">Add slide</h2>
+            <p class="mt-1 text-xs text-stone-500 leading-5">Upload JPG or PNG portraits. These rotate on the homepage for mobile and desktop.</p>
+            <form method="post" enctype="multipart/form-data" action="'.$this->url('/admin/slide-upload').'" class="mt-4 space-y-3">
+              '.$this->csrfField().'
+              <input required type="file" name="slide" accept="image/jpeg,image/png,image/webp" class="block w-full text-sm">
+              <button class="rounded-xl bg-stone-950 px-4 py-2.5 text-sm font-bold text-white">Upload slide</button>
+            </form>
+            <a href="'.$this->url('/').'" class="mt-4 inline-flex text-xs font-bold text-stone-600">Preview homepage →</a>
+          </div>
+        </div>';
+        $this->render('Homepage slides', $this->adminShell('Homepage slides', $body), ['portal' => 'admin']);
+    }
+
+    private function homeSlidesAll(): array
+    {
+        return $this->db->query("SELECT * FROM home_slides ORDER BY sort_order ASC, id ASC")->fetchAll();
+    }
+
+    private function uploadHomeSlide(): void
+    {
+        $this->requireRole('admin');
+        if (!isset($_FILES['slide']) || $_FILES['slide']['error'] !== UPLOAD_ERR_OK) {
+            $this->flash('error', 'Upload failed. Try another image.');
+            $this->redirect('/admin/slides');
+        }
+        $f = $_FILES['slide'];
+        if ($f['size'] > 12 * 1024 * 1024) {
+            $this->flash('error', 'Image must be under 12 MB.');
+            $this->redirect('/admin/slides');
+        }
+        $mime = function_exists('mime_content_type') ? (mime_content_type($f['tmp_name']) ?: '') : '';
+        $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+        if (!isset($allowed[$mime])) {
+            $this->flash('error', 'Use JPG, PNG or WebP only.');
+            $this->redirect('/admin/slides');
+        }
+        $dir = __DIR__.'/../assets/slides';
+        if (!is_dir($dir)) mkdir($dir, 0775, true);
+        $stored = 'slide-'.bin2hex(random_bytes(8)).'.'.$allowed[$mime];
+        if (!move_uploaded_file($f['tmp_name'], $dir.'/'.$stored)) {
+            $this->flash('error', 'Could not save the image.');
+            $this->redirect('/admin/slides');
+        }
+        $order = (int)$this->db->query("SELECT COALESCE(MAX(sort_order),0)+1 FROM home_slides")->fetchColumn();
+        $this->db->prepare("INSERT INTO home_slides (stored_name,original_name,sort_order,active,created_at) VALUES (?,?,?,1,?)")
+            ->execute([$stored, $f['name'], $order, $this->now()]);
+        $this->flash('success', 'Slide added to the homepage.');
+        $this->redirect('/admin/slides');
+    }
+
+    private function deleteHomeSlide(): void
+    {
+        $this->requireRole('admin');
+        $id = (int)($_POST['id'] ?? 0);
+        $stmt = $this->db->prepare("SELECT * FROM home_slides WHERE id=?");
+        $stmt->execute([$id]);
+        $slide = $stmt->fetch();
+        if ($slide) {
+            $this->db->prepare("DELETE FROM home_slides WHERE id=?")->execute([$id]);
+            $file = __DIR__.'/../assets/slides/'.basename($slide['stored_name']);
+            if (is_file($file) && !in_array(basename($slide['stored_name']), ['gown.jpg','couple.jpg','bridal-party.jpg'], true)) {
+                @unlink($file);
+            }
+        }
+        $this->flash('success', 'Slide removed.');
+        $this->redirect('/admin/slides');
+    }
+
+    private function moveHomeSlide(): void
+    {
+        $this->requireRole('admin');
+        $id = (int)($_POST['id'] ?? 0);
+        $dir = ($_POST['dir'] ?? '') === 'up' ? -1 : 1;
+        $slides = $this->homeSlidesAll();
+        $idx = null;
+        foreach ($slides as $i => $s) {
+            if ((int)$s['id'] === $id) { $idx = $i; break; }
+        }
+        if ($idx === null) {
+            $this->redirect('/admin/slides');
+        }
+        $swap = $idx + $dir;
+        if ($swap < 0 || $swap >= count($slides)) {
+            $this->redirect('/admin/slides');
+        }
+        $a = $slides[$idx];
+        $b = $slides[$swap];
+        $this->db->prepare("UPDATE home_slides SET sort_order=? WHERE id=?")->execute([(int)$b['sort_order'], $a['id']]);
+        $this->db->prepare("UPDATE home_slides SET sort_order=? WHERE id=?")->execute([(int)$a['sort_order'], $b['id']]);
+        // normalize if orders collided
+        if ((int)$a['sort_order'] === (int)$b['sort_order']) {
+            foreach ($slides as $i => $s) {
+                $this->db->prepare("UPDATE home_slides SET sort_order=? WHERE id=?")->execute([$i + 1, $s['id']]);
+            }
+            $slides = $this->homeSlidesAll();
+            foreach ($slides as $i => $s) {
+                if ((int)$s['id'] === $id) { $idx = $i; break; }
+            }
+            $swap = $idx + $dir;
+            if ($swap >= 0 && $swap < count($slides)) {
+                $a = $slides[$idx]; $b = $slides[$swap];
+                $this->db->prepare("UPDATE home_slides SET sort_order=? WHERE id=?")->execute([$swap + 1, $a['id']]);
+                $this->db->prepare("UPDATE home_slides SET sort_order=? WHERE id=?")->execute([$idx + 1, $b['id']]);
+            }
+        }
+        $this->redirect('/admin/slides');
+    }
+
     private function paymentInstructions(array $b,float $amount,string $type): string
     {
         $ref=$b['booking_code'];
@@ -1297,16 +1481,17 @@ body.home-lock{height:100svh;overflow:hidden}
 @media (prefers-reduced-motion:reduce){
   .site-nav-link::after,.site-nav-ico,.mobile-nav-link{transition:none}
 }
-.clean-home{height:calc(100svh - 4.25rem);display:grid;grid-template-rows:minmax(0,1.08fr) minmax(0,1fr);grid-template-areas:"visual" "copy";background:#f7f6f3;overflow:hidden}
+.clean-home{height:calc(100svh - 4.25rem);display:grid;grid-template-rows:minmax(0,.9fr) auto;grid-template-areas:"visual" "copy";background:#f7f6f3;overflow:hidden}
 .clean-visual{grid-area:visual;position:relative;min-height:0;overflow:hidden;background:#e8e4de}
-.clean-visual-frame{position:absolute;inset:0;overflow:hidden;opacity:0;animation:hero-enter .7s ease forwards}
-.clean-slide{position:absolute;inset:0;margin:0;opacity:0;animation:slide-fade 18s ease-in-out infinite;animation-delay:calc(var(--i) * 6s)}
-.clean-slide:first-child{animation-name:slide-fade-first;opacity:1}
-.clean-slide img{width:100%;height:100%;object-fit:cover;object-position:center 30%;display:block;transform:scale(1.04);filter:saturate(1.03) contrast(1.02);will-change:transform;animation:slide-ken 18s ease-in-out infinite;animation-delay:calc(var(--i) * 6s);backface-visibility:hidden}
-.clean-slide:first-child img{animation-name:slide-ken-first}
+.clean-visual-frame{position:absolute;inset:0;overflow:hidden;opacity:0;animation:hero-enter .65s ease forwards}
+.clean-slide{position:absolute;inset:0;margin:0;opacity:0;transition:opacity 1.1s ease;z-index:0}
+.clean-slide.is-active{opacity:1;z-index:1}
+.clean-slide img,.clean-slide-empty{width:100%;height:100%;object-fit:cover;object-position:center 12%;display:block;transform:scale(1.03);filter:saturate(1.03) contrast(1.02);backface-visibility:hidden}
+.clean-slide.is-active img{animation:slide-ken 6.5s ease-out forwards}
+.clean-slide-empty{background:linear-gradient(145deg,#d6d3d1,#f5f5f4)}
 .clean-visual-fade{position:absolute;inset:auto 0 0 0;height:38%;background:linear-gradient(to top,#f7f6f3 10%,rgba(247,246,243,.65) 50%,transparent);pointer-events:none;z-index:2}
-.clean-wrap{grid-area:copy;min-height:0;display:flex;flex-direction:column;justify-content:center;padding:.15rem 1.25rem calc(.85rem + env(safe-area-inset-bottom));max-width:28rem;margin:0 auto;width:100%;animation:clean-up .65s ease .1s both}
-.clean-display{margin:0;font-family:"Cormorant Garamond",ui-serif,Georgia,serif;font-size:clamp(3.6rem,14vw,5.5rem);font-weight:600;letter-spacing:-.01em;line-height:.88;color:#1c1917}
+.clean-wrap{grid-area:copy;min-height:0;overflow:visible;display:flex;flex-direction:column;justify-content:flex-start;padding:.85rem 1.25rem calc(.85rem + env(safe-area-inset-bottom));max-width:28rem;margin:0 auto;width:100%;animation:clean-up .55s ease .08s both}
+.clean-display{margin:0;padding-top:.12em;font-family:"Cormorant Garamond",ui-serif,Georgia,serif;font-size:clamp(2.85rem,11.5vw,4.4rem);font-weight:600;letter-spacing:-.015em;line-height:1.08;color:#1c1917;overflow:visible}
 .clean-title{margin:.55rem 0 0;font-size:clamp(1.05rem,4.2vw,1.25rem);font-weight:600;letter-spacing:-.02em;line-height:1.3;color:#44403c}
 .clean-lead{margin:.5rem 0 0;font-size:.86rem;line-height:1.5;color:#78716c;max-width:22rem}
 .clean-actions{margin-top:.9rem}
@@ -1330,48 +1515,27 @@ body.home-lock{height:100svh;overflow:hidden}
 .clean-foot a{color:#57534e;text-decoration:none}
 @keyframes clean-up{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @keyframes hero-enter{from{opacity:0}to{opacity:1}}
-@keyframes slide-fade-first{
-  0%,28%{opacity:1}
-  34%{opacity:0}
-  100%{opacity:0}
-}
-@keyframes slide-fade{
-  0%{opacity:0}
-  6%{opacity:1}
-  28%{opacity:1}
-  34%{opacity:0}
-  100%{opacity:0}
-}
-@keyframes slide-ken-first{
-  0%{transform:scale(1.04)}
-  28%{transform:scale(1.1)}
-  34%,100%{transform:scale(1.1)}
-}
-@keyframes slide-ken{
-  0%{transform:scale(1.04)}
-  28%{transform:scale(1.1)}
-  34%,100%{transform:scale(1.1)}
-}
+@keyframes slide-ken{from{transform:scale(1.03)}to{transform:scale(1.09)}}
 @media (prefers-reduced-motion:reduce){
-  .clean-visual-frame,.clean-slide,.clean-slide img,.clean-wrap{animation:none!important;opacity:1;transform:none;filter:none;will-change:auto}
-  .clean-slide{opacity:0}
-  .clean-slide:first-child{opacity:1}
+  .clean-visual-frame,.clean-slide img,.clean-wrap{animation:none!important;opacity:1;transform:none;filter:none}
+  .clean-slide{transition:none}
 }
 @media (min-width:768px){
   .clean-home{grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);grid-template-rows:1fr;grid-template-areas:"copy visual";max-width:72rem;margin:0 auto;padding:1rem 1rem 1rem 0;gap:0 1.25rem;align-items:stretch}
+  .clean-home{grid-template-rows:1fr}
   .clean-visual{border-radius:0;overflow:visible;background:transparent}
   .clean-visual-frame{inset:.5rem .75rem .5rem .15rem;border-radius:1.6rem;box-shadow:0 24px 50px rgba(28,25,23,.1)}
-  .clean-slide img{object-position:center 28%}
+  .clean-slide img{object-position:center 18%}
   .clean-visual-fade{inset:0 auto 0 0;width:24%;height:auto;background:linear-gradient(to right,#f7f6f3,rgba(247,246,243,.18) 55%,transparent);border-radius:1.6rem 0 0 1.6rem}
-  .clean-wrap{padding:1.5rem 1rem 1.5rem 1.75rem;max-width:none;justify-content:center}
-  .clean-display{font-size:5.75rem}
+  .clean-wrap{padding:1.75rem 1rem 1.5rem 1.75rem;max-width:none;justify-content:center}
+  .clean-display{font-size:5.25rem;line-height:1.05}
   .clean-title{font-size:1.2rem;margin-top:.7rem}
   .clean-lead{font-size:.95rem;margin-top:.55rem}
   .clean-actions{margin-top:1.1rem}
   .clean-cats{margin-top:1.35rem;max-width:22rem}
 }
 @media (max-height:700px){
-  .clean-display{font-size:3.1rem}
+  .clean-display{font-size:2.7rem;line-height:1.08}
   .clean-title{font-size:1rem;margin-top:.4rem}
   .clean-lead{font-size:.78rem;margin-top:.3rem}
   .clean-actions{margin-top:.7rem}
@@ -1575,6 +1739,7 @@ body.portal-app{min-height:100svh}
             ['/admin/packages', 'Packages', 'Offers'],
             ['/admin/clients', 'Clients', 'People'],
             ['/admin/coupons', 'Coupons', 'Codes'],
+            ['/admin/slides', 'Homepage', 'Slides'],
             ['/admin/reports', 'Reports', 'Money'],
             ['/admin/settings', 'Settings', 'Studio'],
         ];
