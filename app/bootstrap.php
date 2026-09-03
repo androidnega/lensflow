@@ -367,7 +367,16 @@ SQL;
         $phone = htmlspecialchars($this->config['momo_number'] ?? '0257940791');
         $phoneHref = preg_replace('/\s+/', '', $this->config['momo_number'] ?? '0257940791');
         $meta = $this->packageCategoryMeta();
-        $hero = htmlspecialchars($this->url('/assets/hero-home.jpg'));
+        $slides = [
+            $this->url('/assets/slide-1.jpg'),
+            $this->url('/assets/slide-2.jpg'),
+            $this->url('/assets/slide-3.jpg'),
+        ];
+        $slideHtml = '';
+        foreach ($slides as $idx => $src) {
+            $prio = $idx === 0 ? ' fetchpriority="high"' : ' loading="lazy"';
+            $slideHtml .= '<figure class="clean-slide" style="--i:'.$idx.'"><img src="'.htmlspecialchars($src).'" alt="" width="1024" height="1280" decoding="async"'.$prio.'></figure>';
+        }
 
         $cats = '';
         $i = 0;
@@ -389,8 +398,8 @@ SQL;
         $body = '
         <section class="clean-home">
           <div class="clean-visual">
-            <div class="clean-visual-frame">
-              <img src="'.$hero.'" alt="" class="clean-visual-img" width="819" height="1024" decoding="async" fetchpriority="high">
+            <div class="clean-visual-frame" aria-hidden="true">
+              '.$slideHtml.'
             </div>
             <div class="clean-visual-fade" aria-hidden="true"></div>
           </div>
@@ -1289,10 +1298,13 @@ body.home-lock{height:100svh;overflow:hidden}
   .site-nav-link::after,.site-nav-ico,.mobile-nav-link{transition:none}
 }
 .clean-home{height:calc(100svh - 4.25rem);display:grid;grid-template-rows:minmax(0,1.08fr) minmax(0,1fr);grid-template-areas:"visual" "copy";background:#f7f6f3;overflow:hidden}
-.clean-visual{grid-area:visual;position:relative;min-height:0;overflow:hidden;background:#ebe8e2}
-.clean-visual-frame{position:absolute;inset:0;overflow:hidden;clip-path:inset(2% 0 3% 0 round 0);opacity:0;animation:hero-reveal 1s cubic-bezier(.22,1,.36,1) forwards;box-shadow:none}
-.clean-visual-img{width:100%;height:100%;object-fit:cover;object-position:center 28%;display:block;will-change:transform;transform:scale(1.08);animation:hero-zoom 36s ease-in-out infinite;filter:saturate(1.05) contrast(1.03);backface-visibility:hidden}
-.clean-visual-fade{position:absolute;inset:auto 0 0 0;height:42%;background:linear-gradient(to top,#f7f6f3 12%,rgba(247,246,243,.7) 48%,transparent);pointer-events:none;z-index:1}
+.clean-visual{grid-area:visual;position:relative;min-height:0;overflow:hidden;background:#e8e4de}
+.clean-visual-frame{position:absolute;inset:0;overflow:hidden;opacity:0;animation:hero-enter .7s ease forwards}
+.clean-slide{position:absolute;inset:0;margin:0;opacity:0;animation:slide-fade 18s ease-in-out infinite;animation-delay:calc(var(--i) * 6s)}
+.clean-slide:first-child{animation-name:slide-fade-first;opacity:1}
+.clean-slide img{width:100%;height:100%;object-fit:cover;object-position:center 30%;display:block;transform:scale(1.04);filter:saturate(1.03) contrast(1.02);will-change:transform;animation:slide-ken 18s ease-in-out infinite;animation-delay:calc(var(--i) * 6s);backface-visibility:hidden}
+.clean-slide:first-child img{animation-name:slide-ken-first}
+.clean-visual-fade{position:absolute;inset:auto 0 0 0;height:38%;background:linear-gradient(to top,#f7f6f3 10%,rgba(247,246,243,.65) 50%,transparent);pointer-events:none;z-index:2}
 .clean-wrap{grid-area:copy;min-height:0;display:flex;flex-direction:column;justify-content:center;padding:.15rem 1.25rem calc(.85rem + env(safe-area-inset-bottom));max-width:28rem;margin:0 auto;width:100%;animation:clean-up .65s ease .1s both}
 .clean-display{margin:0;font-family:"Cormorant Garamond",ui-serif,Georgia,serif;font-size:clamp(3.6rem,14vw,5.5rem);font-weight:600;letter-spacing:-.01em;line-height:.88;color:#1c1917}
 .clean-title{margin:.55rem 0 0;font-size:clamp(1.05rem,4.2vw,1.25rem);font-weight:600;letter-spacing:-.02em;line-height:1.3;color:#44403c}
@@ -1316,18 +1328,41 @@ body.home-lock{height:100svh;overflow:hidden}
 }
 .clean-foot{margin:.85rem 0 0;display:flex;align-items:center;gap:.45rem;font-size:.78rem;font-weight:600;color:#a8a29e}
 .clean-foot a{color:#57534e;text-decoration:none}
-@keyframes clean-up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-@keyframes hero-reveal{from{opacity:0;transform:translateY(18px) scale(1.03);filter:blur(6px)}to{opacity:1;transform:none;filter:blur(0)}}
-@keyframes hero-zoom{0%{transform:scale(1.08) translate3d(0,0,0)}50%{transform:scale(1.2) translate3d(0,-1.8%,0)}100%{transform:scale(1.08) translate3d(0,0,0)}}
+@keyframes clean-up{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes hero-enter{from{opacity:0}to{opacity:1}}
+@keyframes slide-fade-first{
+  0%,28%{opacity:1}
+  34%{opacity:0}
+  100%{opacity:0}
+}
+@keyframes slide-fade{
+  0%{opacity:0}
+  6%{opacity:1}
+  28%{opacity:1}
+  34%{opacity:0}
+  100%{opacity:0}
+}
+@keyframes slide-ken-first{
+  0%{transform:scale(1.04)}
+  28%{transform:scale(1.1)}
+  34%,100%{transform:scale(1.1)}
+}
+@keyframes slide-ken{
+  0%{transform:scale(1.04)}
+  28%{transform:scale(1.1)}
+  34%,100%{transform:scale(1.1)}
+}
 @media (prefers-reduced-motion:reduce){
-  .clean-visual-frame,.clean-visual-img,.clean-wrap{animation:none!important;opacity:1;transform:none;filter:none;will-change:auto}
+  .clean-visual-frame,.clean-slide,.clean-slide img,.clean-wrap{animation:none!important;opacity:1;transform:none;filter:none;will-change:auto}
+  .clean-slide{opacity:0}
+  .clean-slide:first-child{opacity:1}
 }
 @media (min-width:768px){
   .clean-home{grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);grid-template-rows:1fr;grid-template-areas:"copy visual";max-width:72rem;margin:0 auto;padding:1rem 1rem 1rem 0;gap:0 1.25rem;align-items:stretch}
   .clean-visual{border-radius:0;overflow:visible;background:transparent}
-  .clean-visual-frame{inset:.5rem .75rem .5rem .15rem;clip-path:inset(0 round 1.6rem);box-shadow:0 28px 60px rgba(28,25,23,.12)}
-  .clean-visual-img{object-position:center 28%}
-  .clean-visual-fade{inset:0 auto 0 0;width:26%;height:auto;background:linear-gradient(to right,#f7f6f3,rgba(247,246,243,.2) 55%,transparent);border-radius:1.5rem 0 0 1.5rem}
+  .clean-visual-frame{inset:.5rem .75rem .5rem .15rem;border-radius:1.6rem;box-shadow:0 24px 50px rgba(28,25,23,.1)}
+  .clean-slide img{object-position:center 28%}
+  .clean-visual-fade{inset:0 auto 0 0;width:24%;height:auto;background:linear-gradient(to right,#f7f6f3,rgba(247,246,243,.18) 55%,transparent);border-radius:1.6rem 0 0 1.6rem}
   .clean-wrap{padding:1.5rem 1rem 1.5rem 1.75rem;max-width:none;justify-content:center}
   .clean-display{font-size:5.75rem}
   .clean-title{font-size:1.2rem;margin-top:.7rem}
