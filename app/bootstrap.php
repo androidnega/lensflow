@@ -6,6 +6,7 @@ final class App
     private array $config;
     private PDO $db;
     private ?array $user = null;
+    private string $path = '/';
 
     public function __construct(array $config)
     {
@@ -26,6 +27,7 @@ final class App
             $path = substr($path, strlen($basePath)) ?: '/';
         }
         $path = '/' . trim($path, '/');
+        $this->path = $path === '' ? '/' : $path;
 
         if ($method === 'POST') {
             $this->verifyCsrf();
@@ -748,7 +750,7 @@ SQL;
             '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3">'.$this->stat('Bookings',(string)$active).$this->stat('Paid',$this->money($paid)).$this->stat('Files',(string)$this->clientFileCount()).$this->stat('Account','Active').'</div>'.
             '<div class="mt-7 flex items-center justify-between"><h2 class="text-lg font-black">Recent bookings</h2><a href="'.$this->url('/packages').'" class="rounded-xl bg-slate-950 px-3 py-2 text-xs font-bold text-white">New booking</a></div><div class="mt-3 space-y-3">'.$latest.'</div>'
         );
-        $this->render('Client dashboard',$body);
+        $this->render('Client dashboard',$body,['portal'=>'client']);
     }
 
     private function clientBookings(): void
@@ -759,7 +761,7 @@ SQL;
         $rows = '';
         foreach ($stmt->fetchAll() as $b) $rows .= $this->bookingRow($b,false);
         if (!$rows) $rows = $this->emptyState('No bookings yet','Your bookings will appear here.','/packages','Choose a package');
-        $this->render('Bookings',$this->clientShell('Bookings','<div class="space-y-3">'.$rows.'</div>'));
+        $this->render('Bookings',$this->clientShell('Bookings','<div class="space-y-3">'.$rows.'</div>'),['portal'=>'client']);
     }
 
     private function clientBookingDetail(): void
@@ -788,7 +790,7 @@ SQL;
         $body = $this->clientShell('Booking '.$booking['booking_code'],
             '<div class="grid lg:grid-cols-[1.3fr_.7fr] gap-5"><div class="space-y-5"><div class="rounded-3xl border border-slate-200 bg-white p-5"><div class="flex flex-wrap items-start justify-between gap-4"><div><p class="text-xs font-bold uppercase tracking-wider text-slate-400">'.$booking['booking_code'].'</p><h2 class="mt-1 text-xl font-black">'.htmlspecialchars($booking['package_name']).'</h2><p class="mt-2 text-sm text-slate-600">'.htmlspecialchars($booking['event_type'] ?: 'Photography booking').' · '.htmlspecialchars($booking['event_date'] ?: 'Date to be confirmed').'</p></div>'.$this->badge($booking['status']).'</div><div class="mt-5 grid grid-cols-3 gap-3">'.$this->mini('Total',$this->money((float)$booking['total'])).$this->mini('Paid',$this->money($paid)).$this->mini('Balance',$this->money($balance)).'</div></div>'.$paymentBlock.$contract.'</div><aside><div class="rounded-3xl border border-slate-200 bg-white p-5 sticky top-24"><h3 class="font-black">Project timeline</h3><div class="mt-5">'.$timeline.'</div></div></aside></div>'
         );
-        $this->render('Booking',$body);
+        $this->render('Booking',$body,['portal'=>'client']);
     }
 
     private function submitPayment(): void
@@ -834,7 +836,7 @@ SQL;
             $rows .= '<div class="rounded-3xl border border-slate-200 bg-white p-5"><div class="flex items-center justify-between gap-3"><div><p class="text-sm font-black">'.htmlspecialchars($p['package_name']).' · '.$p['booking_code'].'</p><p class="mt-1 text-xs text-slate-500">'.$p['system_reference'].' · '.$p['submitted_at'].'</p></div>'.$this->badge($p['status']).'</div><div class="mt-4 text-2xl font-black">'.$this->money((float)$p['amount']).'</div></div>';
         }
         if (!$rows) $rows = $this->emptyState('No payments yet','Submitted payments and their verification status will appear here.');
-        $this->render('Payments',$this->clientShell('Payments','<div class="space-y-3">'.$rows.'</div>'));
+        $this->render('Payments',$this->clientShell('Payments','<div class="space-y-3">'.$rows.'</div>'),['portal'=>'client']);
     }
 
     private function clientFiles(): void
@@ -847,7 +849,7 @@ SQL;
             $rows .= '<div class="rounded-3xl border border-slate-200 bg-white p-4 flex items-center justify-between gap-4"><div class="min-w-0"><p class="font-bold truncate">'.htmlspecialchars($f['original_name']).'</p><p class="mt-1 text-xs text-slate-500">'.htmlspecialchars($f['package_name']).' · '.$this->formatBytes((int)$f['file_size']).'</p></div><a href="'.$this->url('/download?id='.$f['id']).'" class="shrink-0 rounded-xl bg-slate-950 px-3 py-2 text-xs font-bold text-white">Download</a></div>';
         }
         if (!$rows) $rows = $this->emptyState('No files delivered yet','Your final soft copies will appear here when the studio releases them.');
-        $this->render('Files',$this->clientShell('Delivered files','<div class="space-y-3">'.$rows.'</div>'));
+        $this->render('Files',$this->clientShell('Delivered files','<div class="space-y-3">'.$rows.'</div>'),['portal'=>'client']);
     }
 
     private function downloadFile(): void
@@ -870,7 +872,7 @@ SQL;
     {
         $this->requireRole('client');
         $form = '<form method="post" action="'.$this->url('/client/profile').'" class="space-y-4 max-w-xl">'.$this->csrfField().$this->input('first_name','First name','text',$this->user['first_name']).$this->input('last_name','Last name','text',$this->user['last_name']).$this->input('email','Email','email',$this->user['email'] ?? '').'<div><label class="text-sm font-bold">Phone number</label><input disabled value="'.htmlspecialchars($this->user['phone']).'" class="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-slate-500"></div><button class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Save profile</button></form>';
-        $this->render('Profile',$this->clientShell('Profile',$form));
+        $this->render('Profile',$this->clientShell('Profile',$form),['portal'=>'client']);
     }
 
     private function updateProfile(): void
@@ -894,7 +896,7 @@ SQL;
         $body = $this->adminShell('Dashboard',
             '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3">'.$this->stat('Revenue',$this->money($revenue)).$this->stat('Bookings',(string)$bookings).$this->stat('Clients',(string)$clients).$this->stat('Pending payments',(string)$pending).'</div><div class="mt-7 flex items-center justify-between"><h2 class="text-lg font-black">Recent bookings</h2><a href="'.$this->url('/admin/bookings').'" class="text-sm font-bold">View all →</a></div><div class="mt-3 space-y-3">'.$rows.'</div>'
         );
-        $this->render('Admin dashboard',$body);
+        $this->render('Admin dashboard',$body,['portal'=>'admin']);
     }
 
     private function adminBookings(): void
@@ -904,7 +906,7 @@ SQL;
         $rows = '';
         foreach ($stmt->fetchAll() as $b) $rows .= $this->bookingRow($b,true);
         if (!$rows) $rows = $this->emptyState('No bookings','Client bookings will appear here.');
-        $this->render('Admin bookings',$this->adminShell('Bookings','<div class="space-y-3">'.$rows.'</div>'));
+        $this->render('Admin bookings',$this->adminShell('Bookings','<div class="space-y-3">'.$rows.'</div>'),['portal'=>'admin']);
     }
 
     private function adminBookingDetail(): void
@@ -931,7 +933,7 @@ SQL;
         $body = $this->adminShell('Booking '.$b['booking_code'],
             '<div class="grid xl:grid-cols-[1.1fr_.9fr] gap-5"><div class="space-y-5"><div class="rounded-3xl border border-slate-200 bg-white p-5"><div class="flex flex-wrap items-start justify-between gap-4"><div><p class="text-xs font-bold text-slate-400">'.$b['booking_code'].'</p><h2 class="mt-1 text-xl font-black">'.htmlspecialchars($b['first_name'].' '.$b['last_name']).'</h2><p class="mt-1 text-sm text-slate-600">'.htmlspecialchars($b['package_name']).' · '.htmlspecialchars($b['phone']).'</p></div>'.$this->badge($b['status']).'</div><div class="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">'.$this->mini('Total',$this->money((float)$b['total'])).$this->mini('Paid',$this->money($this->bookingPaid($id))).$this->mini('Event',$b['event_date'] ?: 'TBC').$this->mini('Contract',(int)$b['contract_accepted']?'Accepted':'Pending').'</div></div><div class="rounded-3xl border border-slate-200 bg-white p-5"><h3 class="font-black">Update booking</h3><form method="post" action="'.$this->url('/admin/booking-status').'" class="mt-4 flex flex-col sm:flex-row gap-3">'.$this->csrfField().'<input type="hidden" name="booking_id" value="'.$id.'"><select name="status" class="rounded-xl border border-slate-200 px-4 py-3 text-sm"><option value="awaiting_payment">Awaiting payment</option><option value="confirmed">Confirmed</option><option value="scheduled">Scheduled</option><option value="shoot_completed">Shoot completed</option><option value="editing">Editing</option><option value="ready">Ready</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select><button class="rounded-xl bg-slate-950 px-4 py-3 text-sm font-bold text-white">Update status</button></form></div><div class="rounded-3xl border border-slate-200 bg-white p-5"><h3 class="font-black">Payments</h3><div class="mt-4 space-y-3">'.($paymentRows ?: '<p class="text-sm text-slate-500">No payment submitted.</p>').'</div></div></div><aside class="space-y-5"><div class="rounded-3xl border border-slate-200 bg-white p-5"><h3 class="font-black">Timeline</h3><div class="mt-4">'.$timeline.'</div><form method="post" action="'.$this->url('/admin/timeline-add').'" class="mt-5 space-y-3">'.$this->csrfField().'<input type="hidden" name="booking_id" value="'.$id.'">'.$this->input('title','New timeline step').$this->input('due_date','Due date','date').'<button class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Add step</button></form></div><div class="rounded-3xl border border-slate-200 bg-white p-5"><h3 class="font-black">Deliver soft copies</h3><p class="mt-1 text-sm text-slate-500">Files uploaded here are protected and only this client can download them.</p><form method="post" enctype="multipart/form-data" action="'.$this->url('/admin/file-upload').'" class="mt-4 space-y-3">'.$this->csrfField().'<input type="hidden" name="booking_id" value="'.$id.'"><input required type="file" name="delivery_file" class="block w-full text-sm"><button class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Upload file</button></form></div></aside></div>'
         );
-        $this->render('Booking admin',$body);
+        $this->render('Booking admin',$body,['portal'=>'admin']);
     }
 
     private function adminPayments(): void
@@ -944,7 +946,7 @@ SQL;
             $rows.='<div class="rounded-3xl border border-slate-200 bg-white p-5"><div class="flex flex-wrap items-center justify-between gap-3"><div><p class="font-black">'.htmlspecialchars($p['first_name'].' '.$p['last_name']).' · '.$p['booking_code'].'</p><p class="mt-1 text-xs text-slate-500">MTN '.$p['sender_number'].' · Txn '.$p['momo_reference'].'</p></div><div class="text-right"><p class="text-lg font-black">'.$this->money((float)$p['amount']).'</p>'.$this->badge($p['status']).'</div></div>'.$actions.'</div>';
         }
         if(!$rows)$rows=$this->emptyState('No payments','Client payment submissions will appear here.');
-        $this->render('Payments',$this->adminShell('Payments','<div class="space-y-3">'.$rows.'</div>'));
+        $this->render('Payments',$this->adminShell('Payments','<div class="space-y-3">'.$rows.'</div>'),['portal'=>'admin']);
     }
 
     private function verifyPayment(): void
@@ -1042,7 +1044,7 @@ SQL;
             $rows.='<div class="rounded-3xl border border-slate-200 bg-white p-5"><div class="flex justify-between gap-3"><div><p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">'.$cat.'</p><p class="font-black">'.htmlspecialchars($p['name']).'</p><p class="text-sm text-slate-500">'.$this->money((float)$p['price']).' · '.(int)$p['deposit_percent'].'% deposit · '.(int)$p['turnaround_days'].' days</p></div>'.$this->badge((int)$p['active']?'active':'inactive').'</div><form method="post" action="'.$this->url('/admin/package-delete').'" class="mt-3">'.$this->csrfField().'<input type="hidden" name="id" value="'.$p['id'].'"><button class="text-xs font-bold text-red-600">Deactivate</button></form></div>';
         }
         $form='<form method="post" action="'.$this->url('/admin/package-save').'" class="grid md:grid-cols-2 gap-4">'.$this->csrfField().$this->input('name','Package name').'<div><label class="text-sm font-bold">Category</label><select name="category" class="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3"><option value="wedding">Wedding & Engagement</option><option value="baby">Baby Dedication & Christening</option><option value="studio">Studio Shoot</option></select></div>'.$this->input('price','Price','number').$this->input('deposit_percent','Initial payment %','number','50').$this->input('turnaround_days','Turnaround days','number','14').'<div class="md:col-span-2"><label class="text-sm font-bold">Description</label><textarea name="description" class="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3"></textarea></div><div class="md:col-span-2"><label class="text-sm font-bold">Deliverables, one per line</label><textarea name="deliverables" rows="5" class="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3"></textarea></div><div class="md:col-span-2"><button class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Add package</button></div></form>';
-        $this->render('Packages',$this->adminShell('Packages','<div class="grid xl:grid-cols-[.9fr_1.1fr] gap-5"><div class="space-y-3">'.$rows.'</div><div class="rounded-3xl border border-slate-200 bg-white p-5"><h2 class="font-black">Create package</h2><div class="mt-4">'.$form.'</div></div></div>'));
+        $this->render('Packages',$this->adminShell('Packages','<div class="grid xl:grid-cols-[.9fr_1.1fr] gap-5"><div class="space-y-3">'.$rows.'</div><div class="rounded-3xl border border-slate-200 bg-white p-5"><h2 class="font-black">Create package</h2><div class="mt-4">'.$form.'</div></div></div>'),['portal'=>'admin']);
     }
 
     private function savePackage(): void
@@ -1075,7 +1077,7 @@ SQL;
         }
         if(!$rows)$rows='<p class="text-sm text-slate-500">No coupons created.</p>';
         $form='<form method="post" action="'.$this->url('/admin/coupon-save').'" class="grid sm:grid-cols-2 gap-4">'.$this->csrfField().$this->input('code','Coupon code').'<div><label class="text-sm font-bold">Discount type</label><select name="type" class="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3"><option value="percent">Percentage</option><option value="fixed">Fixed amount</option></select></div>'.$this->input('value','Discount value','number').$this->input('max_uses','Maximum uses (0 = unlimited)','number','0').$this->input('expires_at','Expiry date','date').'<div class="sm:col-span-2"><button class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Create coupon</button></div></form>';
-        $this->render('Coupons',$this->adminShell('Coupons','<div class="grid xl:grid-cols-[.9fr_1.1fr] gap-5"><div class="space-y-3">'.$rows.'</div><div class="rounded-3xl border border-slate-200 bg-white p-5"><h2 class="font-black">New coupon</h2><div class="mt-4">'.$form.'</div></div></div>'));
+        $this->render('Coupons',$this->adminShell('Coupons','<div class="grid xl:grid-cols-[.9fr_1.1fr] gap-5"><div class="space-y-3">'.$rows.'</div><div class="rounded-3xl border border-slate-200 bg-white p-5"><h2 class="font-black">New coupon</h2><div class="mt-4">'.$form.'</div></div></div>'),['portal'=>'admin']);
     }
 
     private function saveCoupon(): void
@@ -1104,7 +1106,7 @@ SQL;
         $rows='';
         foreach($stmt->fetchAll() as $u)$rows.='<div class="rounded-3xl border border-slate-200 bg-white p-5"><div class="flex justify-between gap-3"><div><p class="font-black">'.htmlspecialchars($u['first_name'].' '.$u['last_name']).'</p><p class="mt-1 text-xs text-slate-500">'.htmlspecialchars($u['phone']).' · '.htmlspecialchars($u['email']??'No email').'</p></div><div class="text-right"><p class="font-black">'.$u['bookings'].' bookings</p><p class="text-xs text-slate-500">'.$this->money((float)$u['booked_value']).' booked</p></div></div></div>';
         if(!$rows)$rows=$this->emptyState('No clients','Registered customers will appear here.');
-        $this->render('Clients',$this->adminShell('Clients','<div class="space-y-3">'.$rows.'</div>'));
+        $this->render('Clients',$this->adminShell('Clients','<div class="space-y-3">'.$rows.'</div>'),['portal'=>'admin']);
     }
 
     private function adminReports(): void
@@ -1120,14 +1122,14 @@ SQL;
         foreach($stmt->fetchAll() as $r)$rows.='<div class="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4"><span class="text-sm font-bold">'.$r['month'].'</span><span class="font-black">'.$this->money((float)$r['total']).'</span></div>';
         if(!$rows)$rows='<p class="text-sm text-slate-500">No verified revenue yet.</p>';
         $body='<div class="grid grid-cols-2 lg:grid-cols-4 gap-3">'.$this->stat('All verified',$this->money($verified)).$this->stat('This month',$this->money($monthTotal)).$this->stat('Pending review',$this->money($pending)).$this->stat('Outstanding',$this->money(max(0,$outstanding))).'</div><div class="mt-6 rounded-3xl border border-slate-200 bg-white p-5"><h2 class="font-black">Monthly money received</h2><div class="mt-4 space-y-2">'.$rows.'</div></div>';
-        $this->render('Reports',$this->adminShell('Reports & money',$body));
+        $this->render('Reports',$this->adminShell('Reports & money',$body),['portal'=>'admin']);
     }
 
     private function adminSettings(): void
     {
         $this->requireRole('admin');
         $form='<form method="post" action="'.$this->url('/admin/settings').'" class="space-y-4 max-w-2xl">'.$this->csrfField().'<div><label class="text-sm font-bold">Contract text</label><textarea name="contract_text" rows="9" class="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3">'.htmlspecialchars($this->setting('contract_text')).'</textarea></div><div><label class="text-sm font-bold">Client note</label><textarea name="studio_note" rows="4" class="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3">'.htmlspecialchars($this->setting('studio_note')).'</textarea></div><button class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Save settings</button></form>';
-        $this->render('Settings',$this->adminShell('Settings',$form));
+        $this->render('Settings',$this->adminShell('Settings',$form),['portal'=>'admin']);
     }
 
     private function saveSettings(): void
@@ -1241,16 +1243,26 @@ SQL;
     private function render(string $title, string $content, array $options = []): void
     {
         $isHome = !empty($options['home']);
+        $portal = (string)($options['portal'] ?? '');
+        $isPortal = $portal === 'admin' || $portal === 'client';
         $flashes=$_SESSION['flash']??[];unset($_SESSION['flash']);
         $flashHtml='';
         foreach($flashes as $f){
             $cls=$f['type']==='error'?'bg-red-50 border-red-200 text-red-800':'bg-emerald-50 border-emerald-200 text-emerald-800';
-            $flashHtml.='<div class="mb-3 rounded-2xl border '.$cls.' px-4 py-3 text-sm font-semibold">'.htmlspecialchars($f['message']).'</div>';
+            $flashHtml.='<div class="mb-2 rounded-xl border '.$cls.' px-3 py-2 text-sm font-semibold">'.htmlspecialchars($f['message']).'</div>';
         }
-        $nav=$this->topNav(false);
-        $flashBlock = $flashHtml !== '' ? '<div class="max-w-6xl mx-auto px-4 pt-4">'.$flashHtml.'</div>' : '';
+        $nav = $isPortal ? '' : $this->topNav(false);
+        $flashBlock = $flashHtml === '' ? '' : ($isPortal
+            ? '<div class="px-3 pt-2">'.$flashHtml.'</div>'
+            : '<div class="max-w-6xl mx-auto px-4 pt-4">'.$flashHtml.'</div>');
         $appName=htmlspecialchars($this->config['app_name']??'LensFlow');
-        $bodyClass = $isHome ? 'home-lock bg-[#f7f6f3] text-stone-900 antialiased' : 'bg-stone-50 text-stone-900 antialiased';
+        if ($isHome) {
+            $bodyClass = 'home-lock bg-[#f7f6f3] text-stone-900 antialiased';
+        } elseif ($isPortal) {
+            $bodyClass = 'portal-app bg-[#f4f4f2] text-stone-900 antialiased';
+        } else {
+            $bodyClass = 'bg-stone-50 text-stone-900 antialiased';
+        }
         echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#f7f6f3"><title>'.htmlspecialchars($title).' · '.$appName.'</title><link rel="icon" href="'.$this->url('/assets/favicon.svg').'" type="image/svg+xml"><link rel="apple-touch-icon" href="'.$this->url('/assets/favicon.svg').'"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet"><script src="https://cdn.tailwindcss.com"></script><style>
 html{scroll-behavior:smooth}
 body{font-family:"Outfit",ui-sans-serif,system-ui,sans-serif}
@@ -1333,8 +1345,40 @@ body.home-lock{height:100svh;overflow:hidden}
   .clean-cat-icon{width:2rem;height:2rem}
   .clean-foot{margin:.6rem 0 0}
 }
+
+body.portal-app{min-height:100svh}
+.portal-shell{min-height:100svh;display:flex;flex-direction:column}
+.portal-top{position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:.75rem;height:3.25rem;padding:0 .85rem;border-bottom:1px solid #e7e5e4;background:rgba(255,255,255,.92);backdrop-filter:blur(10px)}
+.portal-brand{display:flex;align-items:center;gap:.55rem;min-width:0;text-decoration:none;color:#1c1917}
+.portal-brand-mark{display:grid;place-items:center;width:1.85rem;height:1.85rem;border-radius:.55rem;background:#1c1917;color:#fafaf9}
+.portal-brand-name{font-family:"Cormorant Garamond",ui-serif,Georgia,serif;font-size:1.2rem;font-weight:600;letter-spacing:.02em;line-height:1}
+.portal-brand-sub{display:block;margin-top:.1rem;font-size:.62rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#a8a29e}
+.portal-top-actions{display:flex;align-items:center;gap:.4rem}
+.portal-chip{display:inline-flex;align-items:center;border-radius:999px;border:1px solid #e7e5e4;background:#fff;padding:.35rem .7rem;font-size:.72rem;font-weight:700;color:#44403c;text-decoration:none}
+.portal-body{display:flex;flex:1;min-height:0}
+.portal-side{display:none;width:13.5rem;flex-shrink:0;border-right:1px solid #e7e5e4;background:#fff;padding:.85rem .65rem;position:sticky;top:3.25rem;height:calc(100svh - 3.25rem);overflow:auto}
+.portal-side a{display:flex;align-items:center;gap:.55rem;border-radius:.7rem;padding:.55rem .7rem;font-size:.82rem;font-weight:600;color:#57534e;text-decoration:none}
+.portal-side a:hover{background:#f5f5f4;color:#1c1917}
+.portal-side a.is-active{background:#1c1917;color:#fff}
+.portal-main{flex:1;min-width:0;padding:.85rem .85rem 4.75rem}
+.portal-head{margin-bottom:.85rem}
+.portal-kicker{margin:0;font-size:.65rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#a8a29e}
+.portal-title{margin:.2rem 0 0;font-size:1.35rem;font-weight:800;letter-spacing:-.02em;color:#1c1917}
+.portal-tabs{display:flex;gap:.4rem;overflow-x:auto;padding-bottom:.15rem;margin-bottom:.85rem;-webkit-overflow-scrolling:touch}
+.portal-tabs a{flex:0 0 auto;border-radius:999px;border:1px solid #e7e5e4;background:#fff;padding:.4rem .75rem;font-size:.72rem;font-weight:700;color:#57534e;text-decoration:none}
+.portal-tabs a.is-active{background:#1c1917;border-color:#1c1917;color:#fff}
+.portal-bottom{position:fixed;left:0;right:0;bottom:0;z-index:40;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.15rem;padding:.35rem .45rem calc(.35rem + env(safe-area-inset-bottom));border-top:1px solid #e7e5e4;background:rgba(255,255,255,.96);backdrop-filter:blur(10px)}
+.portal-bottom a{display:flex;flex-direction:column;align-items:center;gap:.15rem;padding:.35rem .2rem;border-radius:.65rem;font-size:.62rem;font-weight:700;color:#78716c;text-decoration:none}
+.portal-bottom a.is-active{color:#1c1917;background:#f5f5f4}
+.portal-bottom svg{width:1.15rem;height:1.15rem}
+@media (min-width:1024px){
+  .portal-side{display:block}
+  .portal-tabs,.portal-bottom{display:none}
+  .portal-main{padding:1rem 1.15rem 1.25rem}
+  .portal-title{font-size:1.55rem}
+}
 </style></head><body class="'.$bodyClass.'">'.$nav.'<main>'.$flashBlock;
-        $footer = $isHome ? '' : '<footer class="border-t border-stone-200 mt-16 bg-white"><div class="max-w-6xl mx-auto px-4 py-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"><div><p class="font-display text-2xl font-semibold tracking-wide text-stone-950">'.$appName.'</p><p class="mt-1 text-sm text-stone-500">Photography · Videography · Client portal</p></div><div class="text-sm text-stone-500 space-y-1 sm:text-right"><p>'.htmlspecialchars($this->config['momo_number']??'').'</p><p>© '.date('Y').' '.htmlspecialchars($this->config['photographer_name']??'Photography Studio').'</p></div></div></footer>';
+        $footer = ($isHome || $isPortal) ? '' : '<footer class="border-t border-stone-200 mt-16 bg-white"><div class="max-w-6xl mx-auto px-4 py-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"><div><p class="font-display text-2xl font-semibold tracking-wide text-stone-950">'.$appName.'</p><p class="mt-1 text-sm text-stone-500">Photography · Videography · Client portal</p></div><div class="text-sm text-stone-500 space-y-1 sm:text-right"><p>'.htmlspecialchars($this->config['momo_number']??'').'</p><p>© '.date('Y').' '.htmlspecialchars($this->config['photographer_name']??'Photography Studio').'</p></div></div></footer>';
         echo $content.'</main>'.$footer.'</body></html>';
     }
 
@@ -1433,14 +1477,130 @@ body.home-lock{height:100svh;overflow:hidden}
         </header>';
     }
 
-    private function clientShell(string $title,string $content): string
+    private function clientShell(string $title, string $content): string
     {
-        return '<div class="max-w-6xl mx-auto px-4 py-6"><div class="grid lg:grid-cols-[210px_1fr] gap-6"><aside class="hidden lg:block"><div class="sticky top-24 space-y-1">'.$this->sideLink('/client/dashboard','Overview').$this->sideLink('/client/bookings','Bookings').$this->sideLink('/client/payments','Payments').$this->sideLink('/client/files','Files').$this->sideLink('/client/profile','Profile').'</div></aside><section><div class="mb-6"><p class="text-xs font-bold uppercase tracking-[.18em] text-slate-400">Client portal</p><h1 class="mt-1 text-2xl sm:text-3xl font-black">'.$title.'</h1></div><div class="lg:hidden mb-5 overflow-x-auto flex gap-2 pb-1">'.$this->mobileLink('/client/dashboard','Overview').$this->mobileLink('/client/bookings','Bookings').$this->mobileLink('/client/payments','Payments').$this->mobileLink('/client/files','Files').'</div>'.$content.'</section></div></div>';
+        $name = htmlspecialchars($this->config['app_name'] ?? 'Mhannuellens');
+        $items = [
+            ['/client/dashboard', 'Home'],
+            ['/client/bookings', 'Bookings'],
+            ['/client/payments', 'Payments'],
+            ['/client/files', 'Files'],
+            ['/client/profile', 'Profile'],
+        ];
+        $side = '';
+        $tabs = '';
+        foreach ($items as [$href, $label]) {
+            $active = $this->portalActive($href) ? ' is-active' : '';
+            $side .= '<a href="'.$this->url($href).'" class="'.$active.'">'.htmlspecialchars($label).'</a>';
+            $tabs .= '<a href="'.$this->url($href).'" class="'.$active.'">'.htmlspecialchars($label).'</a>';
+        }
+        $bottomIcons = [
+            '/client/dashboard' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5Z"/></svg>',
+            '/client/bookings' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 3v2M16 3v2M5 8h14M6.5 5.5h11A1.5 1.5 0 0 1 19 7v12.5A1.5 1.5 0 0 1 17.5 21h-11A1.5 1.5 0 0 1 5 19.5V7a1.5 1.5 0 0 1 1.5-1.5Z"/></svg>',
+            '/client/payments' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 8.5h16v9H4v-9Z"/><path d="M4 11h16M8 14.5h3"/></svg>',
+            '/client/files' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 4h6l4 4v12H8V4Z"/><path d="M14 4v4h4"/></svg>',
+            '/client/profile' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="9" r="3.2"/><path d="M5.5 19c1.5-3 3.7-4.5 6.5-4.5s5 1.5 6.5 4.5"/></svg>',
+        ];
+        $bottom = '';
+        foreach ($items as [$href, $label]) {
+            $active = $this->portalActive($href) ? ' is-active' : '';
+            $short = ['/client/dashboard'=>'Home','/client/bookings'=>'Jobs','/client/payments'=>'Pay','/client/files'=>'Files','/client/profile'=>'You'][$href];
+            $bottom .= '<a href="'.$this->url($href).'" class="'.$active.'">'.$bottomIcons[$href].'<span>'.$short.'</span></a>';
+        }
+        return '<div class="portal-shell">
+          <header class="portal-top">
+            <a class="portal-brand" href="'.$this->url('/client/dashboard').'">
+              <span class="portal-brand-mark"><svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4.5 8.5h2.2l1.2-2h8.2l1.2 2H19.5A1.5 1.5 0 0 1 21 10v7.5A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5V10a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="12" cy="13.5" r="3.2"/></svg></span>
+              <span><span class="portal-brand-name">'.$name.'</span><span class="portal-brand-sub">Client portal</span></span>
+            </a>
+            <div class="portal-top-actions">
+              <a class="portal-chip" href="'.$this->url('/packages').'">Book</a>
+              <a class="portal-chip" href="'.$this->url('/logout').'">Log out</a>
+            </div>
+          </header>
+          <div class="portal-body">
+            <aside class="portal-side">'.$side.'</aside>
+            <section class="portal-main">
+              <div class="portal-head"><p class="portal-kicker">Your studio</p><h1 class="portal-title">'.htmlspecialchars($title).'</h1></div>
+              <div class="portal-tabs">'.$tabs.'</div>
+              '.$content.'
+            </section>
+          </div>
+          <nav class="portal-bottom" aria-label="Client">'.$bottom.'</nav>
+        </div>';
     }
 
-    private function adminShell(string $title,string $content): string
+    private function adminShell(string $title, string $content): string
     {
-        return '<div class="max-w-7xl mx-auto px-4 py-6"><div class="grid lg:grid-cols-[220px_1fr] gap-6"><aside class="hidden lg:block"><div class="sticky top-24 space-y-1">'.$this->sideLink('/admin','Dashboard').$this->sideLink('/admin/bookings','Bookings').$this->sideLink('/admin/payments','Payments').$this->sideLink('/admin/packages','Packages').$this->sideLink('/admin/coupons','Coupons').$this->sideLink('/admin/clients','Clients').$this->sideLink('/admin/reports','Reports').$this->sideLink('/admin/settings','Settings').'</div></aside><section><div class="mb-6"><p class="text-xs font-bold uppercase tracking-[.18em] text-slate-400">Studio admin</p><h1 class="mt-1 text-2xl sm:text-3xl font-black">'.$title.'</h1></div><div class="lg:hidden mb-5 overflow-x-auto flex gap-2 pb-1">'.$this->mobileLink('/admin','Dashboard').$this->mobileLink('/admin/bookings','Bookings').$this->mobileLink('/admin/payments','Payments').$this->mobileLink('/admin/reports','Reports').'</div>'.$content.'</section></div></div>';
+        $name = htmlspecialchars($this->config['app_name'] ?? 'Mhannuellens');
+        $items = [
+            ['/admin', 'Home', 'Overview'],
+            ['/admin/bookings', 'Bookings', 'Jobs'],
+            ['/admin/payments', 'Payments', 'MoMo'],
+            ['/admin/packages', 'Packages', 'Offers'],
+            ['/admin/clients', 'Clients', 'People'],
+            ['/admin/coupons', 'Coupons', 'Codes'],
+            ['/admin/reports', 'Reports', 'Money'],
+            ['/admin/settings', 'Settings', 'Studio'],
+        ];
+        $side = '';
+        $tabs = '';
+        foreach ($items as [$href, $label, $meta]) {
+            $active = $this->portalActive($href) ? ' is-active' : '';
+            $side .= '<a href="'.$this->url($href).'" class="'.$active.'">'.htmlspecialchars($label).'</a>';
+            $tabs .= '<a href="'.$this->url($href).'" class="'.$active.'">'.htmlspecialchars($label).'</a>';
+        }
+        $bottomKeys = ['/admin','/admin/bookings','/admin/payments','/admin/packages','/admin/settings'];
+        $bottomIcons = [
+            '/admin' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5Z"/></svg>',
+            '/admin/bookings' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 3v2M16 3v2M5 8h14M6.5 5.5h11A1.5 1.5 0 0 1 19 7v12.5A1.5 1.5 0 0 1 17.5 21h-11A1.5 1.5 0 0 1 5 19.5V7a1.5 1.5 0 0 1 1.5-1.5Z"/></svg>',
+            '/admin/payments' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 8.5h16v9H4v-9Z"/><path d="M4 11h16M8 14.5h3"/></svg>',
+            '/admin/packages' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 7.5h16M7 4.5h10M6 7.5v10.5A1.5 1.5 0 0 0 7.5 19.5h9a1.5 1.5 0 0 0 1.5-1.5V7.5"/></svg>',
+            '/admin/settings' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M5.8 5.8l1.6 1.6M16.6 16.6l1.6 1.6M18.2 5.8l-1.6 1.6M7.4 16.6l-1.6 1.6"/></svg>',
+        ];
+        $bottom = '';
+        foreach ($bottomKeys as $href) {
+            $label = [ '/admin'=>'Home','/admin/bookings'=>'Jobs','/admin/payments'=>'Pay','/admin/packages'=>'Packs','/admin/settings'=>'More'][$href];
+            $active = $this->portalActive($href) ? ' is-active' : '';
+            $bottom .= '<a href="'.$this->url($href).'" class="'.$active.'">'.$bottomIcons[$href].'<span>'.$label.'</span></a>';
+        }
+        return '<div class="portal-shell">
+          <header class="portal-top">
+            <a class="portal-brand" href="'.$this->url('/admin').'">
+              <span class="portal-brand-mark"><svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4.5 8.5h2.2l1.2-2h8.2l1.2 2H19.5A1.5 1.5 0 0 1 21 10v7.5A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5V10a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="12" cy="13.5" r="3.2"/></svg></span>
+              <span><span class="portal-brand-name">'.$name.'</span><span class="portal-brand-sub">Admin portal</span></span>
+            </a>
+            <div class="portal-top-actions">
+              <a class="portal-chip" href="'.$this->url('/').'">Site</a>
+              <a class="portal-chip" href="'.$this->url('/logout').'">Log out</a>
+            </div>
+          </header>
+          <div class="portal-body">
+            <aside class="portal-side">'.$side.'</aside>
+            <section class="portal-main">
+              <div class="portal-head"><p class="portal-kicker">Studio admin</p><h1 class="portal-title">'.htmlspecialchars($title).'</h1></div>
+              <div class="portal-tabs">'.$tabs.'</div>
+              '.$content.'
+            </section>
+          </div>
+          <nav class="portal-bottom" aria-label="Admin">'.$bottom.'</nav>
+        </div>';
+    }
+
+
+    private function portalActive(string $href): bool
+    {
+        $current = $this->path ?: '/';
+        if ($href === '/admin' || $href === '/client/dashboard') {
+            return $current === $href;
+        }
+        if ($href === '/admin/bookings' && (str_starts_with($current, '/admin/booking') || $current === '/admin/bookings')) {
+            return true;
+        }
+        if ($href === '/client/bookings' && (str_starts_with($current, '/client/booking') || $current === '/client/bookings')) {
+            return true;
+        }
+        return $current === $href || str_starts_with($current, rtrim($href, '/').'/');
     }
 
     private function sideLink(string $href,string $label): string
