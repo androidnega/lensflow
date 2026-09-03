@@ -368,13 +368,16 @@ SQL;
         $hero = htmlspecialchars($this->url('/assets/hero-home.jpg'));
 
         $cats = '';
+        $i = 0;
         foreach ($meta as $slug => $info) {
-            $cats .= '<a href="'.$this->url('/packages/'.$slug).'" class="clean-cat">
+            $i++;
+            $cats .= '<a href="'.$this->url('/packages/'.$slug).'" class="clean-cat" style="--cat-i:'.$i.'">
               <span class="clean-cat-icon">'.$this->categoryIcon($slug, 'h-5 w-5').'</span>
               <span class="clean-cat-label">'.htmlspecialchars($info['short']).'</span>
             </a>';
         }
-        $cats .= '<a href="'.$this->url('/packages').'" class="clean-cat">
+        $i++;
+        $cats .= '<a href="'.$this->url('/packages').'" class="clean-cat" style="--cat-i:'.$i.'">
           <span class="clean-cat-icon">
             <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7.5h16M7 4.5h10M6 7.5v10.5A1.5 1.5 0 0 0 7.5 19.5h9a1.5 1.5 0 0 0 1.5-1.5V7.5"/><path d="M10 11.5h4M10 15h4"/></svg>
           </span>
@@ -1270,10 +1273,18 @@ body.home-lock{height:100svh;overflow:hidden}
 .clean-btn:active{transform:scale(.98)}
 .clean-btn-primary{background:#1c1917;color:#fff}
 .clean-cats{margin-top:1.05rem;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.45rem}
-.clean-cat{display:flex;flex-direction:column;align-items:center;gap:.35rem;padding:.65rem .3rem .6rem;border-radius:1rem;border:1px solid #e7e5e4;background:#fff;color:#1c1917;text-decoration:none;transition:border-color .15s ease,transform .15s ease}
-.clean-cat:active{transform:scale(.97)}
-.clean-cat-icon{display:grid;place-items:center;width:2.25rem;height:2.25rem;border-radius:999px;background:#1c1917;color:#fafaf9}
-.clean-cat-label{font-size:.7rem;font-weight:700;letter-spacing:.01em}
+.clean-cat{display:flex;flex-direction:column;align-items:center;gap:.35rem;padding:.65rem .3rem .6rem;border-radius:1rem;border:1px solid #e7e5e4;background:#fff;color:#1c1917;text-decoration:none;opacity:0;transform:translateY(14px) scale(.96);animation:cat-in .55s cubic-bezier(.22,1,.36,1) calc(.28s + (var(--cat-i,1) * .08s)) forwards;transition:border-color .25s ease,box-shadow .25s ease,translate .25s cubic-bezier(.22,1,.36,1),background .25s ease}
+.clean-cat:hover{border-color:#d6d3d1;background:#fafaf9;box-shadow:0 10px 24px rgba(28,25,23,.08);translate:0 -3px}
+.clean-cat:active{translate:0 -1px;transition-duration:.1s}
+.clean-cat-icon{display:grid;place-items:center;width:2.25rem;height:2.25rem;border-radius:999px;background:#1c1917;color:#fafaf9;transition:transform .35s cubic-bezier(.22,1,.36,1),background .25s ease}
+.clean-cat:hover .clean-cat-icon{transform:scale(1.08) rotate(-4deg);background:#292524}
+.clean-cat-label{font-size:.7rem;font-weight:700;letter-spacing:.01em;transition:color .25s ease}
+.clean-cat:hover .clean-cat-label{color:#0c0a09}
+@keyframes cat-in{from{opacity:0;transform:translateY(14px) scale(.96)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  .clean-cat{opacity:1;transform:none;animation:none;translate:none}
+  .clean-cat:hover .clean-cat-icon{transform:none}
+}
 .clean-foot{margin:.85rem 0 0;display:flex;align-items:center;gap:.45rem;font-size:.78rem;font-weight:600;color:#a8a29e}
 .clean-foot a{color:#57534e;text-decoration:none}
 @keyframes clean-in{from{opacity:.4;transform:scale(1.04)}to{opacity:1;transform:none}}
