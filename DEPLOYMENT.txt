@@ -1,0 +1,20 @@
+LENSFLOW DEPLOYMENT CHECKLIST
+
+1. Edit config.php:
+   - app_name
+   - photographer_name
+   - momo_number
+   - momo_account_name
+   - admin_email
+   - app_key
+
+2. Confirm PHP 8.1+ and PDO_SQLite are enabled.
+3. Confirm Apache mod_rewrite is enabled.
+4. Make storage/ writable by PHP.
+5. Visit the site.
+6. Admin login:
+   Phone: 0200000000
+   Password: ChangeMe123!
+7. Change the admin password before launch.
+8. Configure real SMS provider if required.
+9. Use HTTPS in production.
