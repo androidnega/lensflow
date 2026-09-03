@@ -43,6 +43,7 @@ final class App
                 '/register' => 'registerForm',
                 '/login' => 'loginForm',
                 '/logout' => 'logout',
+                '/auth/otp' => 'otpForm',
                 '/client/dashboard' => 'clientDashboard',
                 '/client/bookings' => 'clientBookings',
                 '/client/booking' => 'clientBookingDetail',
@@ -62,8 +63,10 @@ final class App
                 '/admin/slides' => 'adminSlides',
             ],
             'POST' => [
-                '/register' => 'register',
+                '/register' => 'requestOtp',
                 '/login' => 'login',
+                '/auth/otp' => 'verifyOtp',
+                '/auth/otp-resend' => 'requestOtp',
                 '/book' => 'createBooking',
                 '/client/payment-submit' => 'submitPayment',
                 '/client/contract-accept' => 'acceptContract',
@@ -571,6 +574,10 @@ SQL;
     {
         $deposit = (float)$package['price'] * ((float)$package['deposit_percent'] / 100);
         $icon = $this->categoryIcon((string)($package['category'] ?? 'wedding'), 'h-6 w-6');
+        $contactFields = '';
+        if ($this->profileNeedsName()) {
+            $contactFields = $this->input('contact_name','Your full name').$this->input('contact_email','Email (optional)','email');
+        }
         return '<div id="book" class="mb-10 scroll-mt-28 rounded-[2rem] border border-stone-200 bg-white p-5 sm:p-8 shadow-sm">
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div class="flex items-start gap-4">
@@ -586,6 +593,7 @@ SQL;
           <form method="post" action="'.$this->url('/book').'" class="mt-6 grid md:grid-cols-2 gap-4">
             '.$this->csrfField().'
             <input type="hidden" name="package_id" value="'.(int)$package['id'].'">
+            '.$contactFields.'
             '.$this->eventTypeSelect((string)($package['category'] ?? 'wedding')).'
             '.$this->input('event_date','Event date','date').'
             '.$this->input('event_location','Event location').'
@@ -668,34 +676,134 @@ SQL;
     private function registerForm(): void
     {
         if ($this->user) $this->redirect($this->user['role']==='admin'?'/admin':'/client/dashboard');
-        $packageId = (int)($_GET['package'] ?? 0);
-        $body = $this->authLayout('Create your client account','Use your phone number to keep your booking and project updates in one place.',
-            '<form method="post" action="'.$this->url('/register').'" class="space-y-4">'.$this->csrfField().'<input type="hidden" name="package_id" value="'.$packageId.'">'.$this->input('first_name','First name').$this->input('last_name','Last name').$this->input('phone','Phone number','tel').$this->input('email','Email (optional)','email').$this->input('password','Password','password').'<button class="w-full rounded-2xl bg-slate-950 px-4 py-3 font-bold text-white">Create account</button><p class="text-center text-sm text-slate-500">Already a client? <a class="font-bold text-slate-900" href="'.$this->url('/login').'">Log in</a></p></form>');
+        $packageId = (int)($_GET['package'] ?? ($_SESSION['otp_package_id'] ?? 0));
+        $body = $this->authLayout('Continue with your phone','Enter the phone number you use for MoMo. We will send a one-time code — no password needed.',
+            '<form method="post" action="'.$this->url('/register').'" class="space-y-4">'.$this->csrfField().'<input type="hidden" name="package_id" value="'.$packageId.'"><input type="hidden" name="intent" value="register">'.$this->input('phone','Active phone number','tel').'<button class="w-full rounded-2xl bg-slate-950 px-4 py-3 font-bold text-white">Send OTP</button><p class="text-center text-sm text-slate-500">Already verified? <a class="font-bold text-slate-900" href="'.$this->url('/login').'">Log in with OTP</a></p></form>');
         $this->render('Register', $body);
     }
 
-    private function register(): void
+    private function loginForm(): void
     {
-        $first = trim($_POST['first_name'] ?? '');
-        $last = trim($_POST['last_name'] ?? '');
-        $phone = preg_replace('/\s+/', '', trim($_POST['phone'] ?? ''));
-        $email = trim($_POST['email'] ?? '');
-        $password = (string)($_POST['password'] ?? '');
-        $packageId = (int)($_POST['package_id'] ?? 0);
-        if (!$first || !$last || strlen($phone) < 9 || strlen($password) < 6) {
-            $this->flash('error','Please complete the required fields. Password must be at least 6 characters.');
-            $this->redirect('/register'.($packageId?'?package='.$packageId:''));
+        if ($this->user) $this->redirect($this->user['role']==='admin'?'/admin':'/client/dashboard');
+        $body = $this->authLayout('Welcome back','Clients sign in with a phone OTP. Studio admin can still use the password login below.',
+            '<form method="post" action="'.$this->url('/register').'" class="space-y-4">'.$this->csrfField().'<input type="hidden" name="intent" value="login">'.$this->input('phone','Phone number','tel').'<button class="w-full rounded-2xl bg-slate-950 px-4 py-3 font-bold text-white">Send OTP</button></form>
+            <div class="my-6 flex items-center gap-3 text-xs font-semibold uppercase tracking-wider text-stone-400"><span class="h-px flex-1 bg-stone-200"></span>Admin<span class="h-px flex-1 bg-stone-200"></span></div>
+            <form method="post" action="'.$this->url('/login').'" class="space-y-4">'.$this->csrfField().$this->input('phone','Admin phone','tel').$this->input('password','Password','password').'<button class="w-full rounded-2xl border border-stone-300 bg-white px-4 py-3 font-bold text-stone-900">Admin password login</button></form>
+            <p class="mt-4 text-center text-sm text-slate-500">New here? <a class="font-bold text-slate-900" href="'.$this->url('/register').'">Start with OTP</a></p>');
+        $this->render('Login', $body);
+    }
+
+    private function login(): void
+    {
+        $phone = $this->normalizePhone((string)($_POST['phone'] ?? ''));
+        $stmt = $this->db->prepare("SELECT * FROM users WHERE phone=? LIMIT 1");
+        $stmt->execute([$phone]);
+        $user = $stmt->fetch();
+        if (!$user || ($user['role'] ?? '') !== 'admin' || !password_verify((string)($_POST['password'] ?? ''), $user['password_hash'])) {
+            $this->flash('error','Admin login failed. Clients should use OTP instead.');
+            $this->redirect('/login');
         }
-        try {
-            $stmt = $this->db->prepare("INSERT INTO users (role,first_name,last_name,phone,email,password_hash,created_at) VALUES ('client',?,?,?,?,?,?)");
-            $stmt->execute([$first,$last,$phone,$email ?: null,password_hash($password,PASSWORD_DEFAULT),$this->now()]);
-        } catch (PDOException $e) {
-            $this->flash('error','That phone number already has an account.');
+        $_SESSION['user_id'] = (int)$user['id'];
+        $this->user = $user;
+        $this->redirect('/admin');
+    }
+
+    private function requestOtp(): void
+    {
+        if ($this->user) $this->redirect($this->user['role']==='admin'?'/admin':'/client/dashboard');
+        $phone = $this->normalizePhone((string)($_POST['phone'] ?? ''));
+        $packageId = (int)($_POST['package_id'] ?? 0);
+        $intent = ($_POST['intent'] ?? 'register') === 'login' ? 'login' : 'register';
+        if (strlen($phone) < 9) {
+            $this->flash('error','Enter a valid active phone number.');
+            $this->redirect($intent === 'login' ? '/login' : '/register'.($packageId?'?package='.$packageId:''));
+        }
+        $otp = (string)random_int(100000, 999999);
+        $_SESSION['otp'] = [
+            'phone' => $phone,
+            'hash' => password_hash($otp, PASSWORD_DEFAULT),
+            'expires' => time() + 600,
+            'package_id' => $packageId,
+            'intent' => $intent,
+            'tries' => 0,
+        ];
+        $this->sendSms($phone, 'Your Mhannuellens code is '.$otp.'. It expires in 10 minutes.');
+        if ((($this->config['sms']['driver'] ?? 'log') === 'log')) {
+            $this->flash('success','OTP sent. For local testing, use code '.$otp.'.');
+        } else {
+            $this->flash('success','OTP sent to your phone. Enter it to continue.');
+        }
+        $this->redirect('/auth/otp');
+    }
+
+    private function otpForm(): void
+    {
+        if ($this->user) $this->redirect($this->user['role']==='admin'?'/admin':'/client/dashboard');
+        $otp = $_SESSION['otp'] ?? null;
+        if (!$otp || empty($otp['phone'])) {
+            $this->flash('error','Request a new OTP first.');
             $this->redirect('/register');
         }
-        $_SESSION['user_id'] = (int)$this->db->lastInsertId();
-        $this->user = $this->currentUser();
-        $this->flash('success','Account created successfully.');
+        $masked = $this->maskPhone((string)$otp['phone']);
+        $body = $this->authLayout('Enter your code','We sent a 6-digit OTP to '.$masked.'.',
+            '<form method="post" action="'.$this->url('/auth/otp').'" class="space-y-4">'.$this->csrfField().'
+              <div><label class="text-sm font-bold">OTP code</label><input required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" name="otp" autocomplete="one-time-code" class="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center text-2xl font-bold tracking-[0.35em] outline-none focus:border-slate-400" placeholder="••••••"></div>
+              <button class="w-full rounded-2xl bg-slate-950 px-4 py-3 font-bold text-white">Verify & continue</button>
+            </form>
+            <form method="post" action="'.$this->url('/auth/otp-resend').'" class="mt-4 text-center">'.$this->csrfField().'<input type="hidden" name="phone" value="'.htmlspecialchars((string)$otp['phone']).'"><input type="hidden" name="package_id" value="'.(int)($otp['package_id']??0).'"><input type="hidden" name="intent" value="'.htmlspecialchars((string)($otp['intent']??'register')).'"><button class="text-sm font-bold text-slate-700">Resend OTP</button></form>');
+        $this->render('Verify OTP', $body);
+    }
+
+    private function verifyOtp(): void
+    {
+        $pending = $_SESSION['otp'] ?? null;
+        $code = preg_replace('/\D+/', '', (string)($_POST['otp'] ?? ''));
+        if (!$pending || empty($pending['phone']) || empty($pending['hash'])) {
+            $this->flash('error','OTP session expired. Request a new code.');
+            $this->redirect('/register');
+        }
+        if (time() > (int)$pending['expires']) {
+            unset($_SESSION['otp']);
+            $this->flash('error','That OTP has expired. Request a new one.');
+            $this->redirect('/register'.(!empty($pending['package_id'])?'?package='.(int)$pending['package_id']:''));
+        }
+        $pending['tries'] = (int)($pending['tries'] ?? 0) + 1;
+        $_SESSION['otp'] = $pending;
+        if ($pending['tries'] > 6) {
+            unset($_SESSION['otp']);
+            $this->flash('error','Too many attempts. Request a new OTP.');
+            $this->redirect('/register');
+        }
+        if (!password_verify($code, (string)$pending['hash'])) {
+            $this->flash('error','Incorrect OTP. Try again.');
+            $this->redirect('/auth/otp');
+        }
+
+        $phone = (string)$pending['phone'];
+        $packageId = (int)($pending['package_id'] ?? 0);
+        unset($_SESSION['otp']);
+
+        $stmt = $this->db->prepare("SELECT * FROM users WHERE phone=? LIMIT 1");
+        $stmt->execute([$phone]);
+        $user = $stmt->fetch();
+        if ($user && ($user['role'] ?? '') === 'admin') {
+            $this->flash('error','Admin accounts use password login.');
+            $this->redirect('/login');
+        }
+        if (!$user) {
+            $stmt = $this->db->prepare("INSERT INTO users (role,first_name,last_name,phone,email,password_hash,created_at) VALUES ('client',?,?,?,?,?,?)");
+            $stmt->execute(['Client','', $phone, null, password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT), $this->now()]);
+            $userId = (int)$this->db->lastInsertId();
+            $stmt = $this->db->prepare("SELECT * FROM users WHERE id=?");
+            $stmt->execute([$userId]);
+            $user = $stmt->fetch();
+            $this->flash('success','You are in. Add your name when you confirm the booking.');
+        } else {
+            $this->flash('success','Welcome back.');
+        }
+
+        $_SESSION['user_id'] = (int)$user['id'];
+        $this->user = $user;
         if ($packageId) {
             $stmt = $this->db->prepare("SELECT category FROM packages WHERE id=? AND active=1");
             $stmt->execute([$packageId]);
@@ -705,27 +813,33 @@ SQL;
         $this->redirect('/client/dashboard');
     }
 
-    private function loginForm(): void
+    private function normalizePhone(string $phone): string
     {
-        if ($this->user) $this->redirect($this->user['role']==='admin'?'/admin':'/client/dashboard');
-        $body = $this->authLayout('Welcome back','Access bookings, payments, contracts, progress and delivered files.',
-            '<form method="post" action="'.$this->url('/login').'" class="space-y-4">'.$this->csrfField().$this->input('phone','Phone number','tel').$this->input('password','Password','password').'<button class="w-full rounded-2xl bg-slate-950 px-4 py-3 font-bold text-white">Log in</button><p class="text-center text-sm text-slate-500">New here? <a class="font-bold text-slate-900" href="'.$this->url('/register').'">Create account</a></p></form><div class="mt-6 rounded-2xl bg-amber-50 p-4 text-xs text-amber-800"><strong>First login:</strong> the packaged admin account is <code>0200000000</code> / <code>ChangeMe123!</code>. Change it before production.</div>');
-        $this->render('Login', $body);
+        $phone = preg_replace('/\s+/', '', trim($phone)) ?? '';
+        $phone = preg_replace('/[^\d+]/', '', $phone) ?? '';
+        if (str_starts_with($phone, '233') && strlen($phone) >= 12) {
+            $phone = '0'.substr($phone, 3);
+        }
+        if (str_starts_with($phone, '+233') && strlen($phone) >= 13) {
+            $phone = '0'.substr($phone, 4);
+        }
+        return $phone;
     }
 
-    private function login(): void
+    private function maskPhone(string $phone): string
     {
-        $phone = preg_replace('/\s+/', '', trim($_POST['phone'] ?? ''));
-        $stmt = $this->db->prepare("SELECT * FROM users WHERE phone=? LIMIT 1");
-        $stmt->execute([$phone]);
-        $user = $stmt->fetch();
-        if (!$user || !password_verify((string)($_POST['password'] ?? ''), $user['password_hash'])) {
-            $this->flash('error','Invalid phone number or password.');
-            $this->redirect('/login');
-        }
-        $_SESSION['user_id'] = (int)$user['id'];
-        $this->user = $user;
-        $this->redirect($user['role']==='admin'?'/admin':'/client/dashboard');
+        $len = strlen($phone);
+        if ($len < 6) return $phone;
+        return substr($phone, 0, 3).str_repeat('•', max(2, $len - 5)).substr($phone, -2);
+    }
+
+    private function profileNeedsName(?array $user = null): bool
+    {
+        $user = $user ?? $this->user;
+        if (!$user || ($user['role'] ?? '') !== 'client') return false;
+        $first = trim((string)($user['first_name'] ?? ''));
+        $last = trim((string)($user['last_name'] ?? ''));
+        return $first === '' || strcasecmp($first, 'Client') === 0 || $last === '';
     }
 
     private function logout(): void
@@ -751,6 +865,20 @@ SQL;
             $this->flash('error','Please choose a valid event type.');
             $cat = (string)($package['category'] ?? 'wedding');
             $this->redirect('/packages/'.$cat.'?book='.$packageId.'#book');
+        }
+
+        if ($this->profileNeedsName()) {
+            $full = trim(preg_replace('/\s+/', ' ', (string)($_POST['contact_name'] ?? '')) ?? '');
+            if ($full === '' || !str_contains($full, ' ')) {
+                $this->flash('error','Please enter your full name (first and last).');
+                $cat = (string)($package['category'] ?? 'wedding');
+                $this->redirect('/packages/'.$cat.'?book='.$packageId.'#book');
+            }
+            $parts = explode(' ', $full, 2);
+            $email = trim((string)($_POST['contact_email'] ?? ''));
+            $this->db->prepare("UPDATE users SET first_name=?, last_name=?, email=COALESCE(NULLIF(?, ''), email) WHERE id=?")
+                ->execute([$parts[0], $parts[1], $email, $this->user['id']]);
+            $this->user = $this->currentUser();
         }
 
         $subtotal = (float)$package['price'];
@@ -1456,11 +1584,11 @@ SQL;
         } else {
             $bodyClass = 'bg-stone-50 text-stone-900 antialiased';
         }
-        echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#f7f6f3"><title>'.htmlspecialchars($title).' · '.$appName.'</title><link rel="icon" href="'.$this->url('/assets/favicon.svg').'" type="image/svg+xml"><link rel="apple-touch-icon" href="'.$this->url('/assets/favicon.svg').'"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet"><script src="https://cdn.tailwindcss.com"></script><style>
+        echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#f7f6f3"><title>'.htmlspecialchars($title).' · '.$appName.'</title><link rel="icon" href="'.$this->url('/assets/favicon.svg').'" type="image/svg+xml"><link rel="apple-touch-icon" href="'.$this->url('/assets/favicon.svg').'"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet"><script src="https://cdn.tailwindcss.com"></script><style>
 html{scroll-behavior:smooth}
 body{font-family:"Outfit",ui-sans-serif,system-ui,sans-serif}
 body.home-lock{height:100svh;overflow:hidden}
-.font-display{font-family:"Cormorant Garamond",ui-serif,Georgia,serif}
+.font-display{font-family:"Fraunces",ui-serif,Georgia,serif}
 .safe-bottom{padding-bottom:env(safe-area-inset-bottom)}
 #site-menu:checked~label[for=site-menu] .icon-open{display:none}
 #site-menu:checked~label[for=site-menu] .icon-close{display:block}
@@ -1481,7 +1609,7 @@ body.home-lock{height:100svh;overflow:hidden}
 @media (prefers-reduced-motion:reduce){
   .site-nav-link::after,.site-nav-ico,.mobile-nav-link{transition:none}
 }
-.clean-home{height:calc(100svh - 4.25rem);display:grid;grid-template-rows:minmax(0,.9fr) auto;grid-template-areas:"visual" "copy";background:#f7f6f3;overflow:hidden}
+.clean-home{height:calc(100svh - 3.4rem);display:grid;grid-template-rows:minmax(0,.9fr) auto;grid-template-areas:"visual" "copy";background:#f7f6f3;overflow:hidden}
 .clean-visual{grid-area:visual;position:relative;min-height:0;overflow:hidden;background:#e8e4de}
 .clean-visual-frame{position:absolute;inset:0;overflow:hidden;opacity:0;animation:hero-enter .65s ease forwards}
 .clean-slide{position:absolute;inset:0;margin:0;opacity:0;transition:opacity 1.1s ease;z-index:0}
@@ -1491,7 +1619,7 @@ body.home-lock{height:100svh;overflow:hidden}
 .clean-slide-empty{background:linear-gradient(145deg,#d6d3d1,#f5f5f4)}
 .clean-visual-fade{position:absolute;inset:auto 0 0 0;height:38%;background:linear-gradient(to top,#f7f6f3 10%,rgba(247,246,243,.65) 50%,transparent);pointer-events:none;z-index:2}
 .clean-wrap{grid-area:copy;min-height:0;overflow:visible;display:flex;flex-direction:column;justify-content:flex-start;padding:.85rem 1.25rem calc(.85rem + env(safe-area-inset-bottom));max-width:28rem;margin:0 auto;width:100%;animation:clean-up .55s ease .08s both}
-.clean-display{margin:0;padding-top:.12em;font-family:"Cormorant Garamond",ui-serif,Georgia,serif;font-size:clamp(2.85rem,11.5vw,4.4rem);font-weight:600;letter-spacing:-.015em;line-height:1.08;color:#1c1917;overflow:visible}
+.clean-display{margin:0;padding-top:.12em;font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(2.85rem,11.5vw,4.4rem);font-weight:600;letter-spacing:-.015em;line-height:1.08;color:#1c1917;overflow:visible}
 .clean-title{margin:.55rem 0 0;font-size:clamp(1.05rem,4.2vw,1.25rem);font-weight:600;letter-spacing:-.02em;line-height:1.3;color:#44403c}
 .clean-lead{margin:.5rem 0 0;font-size:.86rem;line-height:1.5;color:#78716c;max-width:22rem}
 .clean-actions{margin-top:.9rem}
@@ -1545,12 +1673,42 @@ body.home-lock{height:100svh;overflow:hidden}
   .clean-foot{margin:.6rem 0 0}
 }
 
+
+.site-header{position:sticky;top:0;z-50;border-bottom:1px solid rgba(231,229,228,.9);background:rgba(255,255,255,.86);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.site-header-inner{max-width:72rem;margin:0 auto;padding:0 1rem;display:flex;align-items:center;justify-content:space-between;gap:.75rem;height:3.4rem}
+.site-brand{display:flex;align-items:center;gap:.65rem;min-width:0;text-decoration:none;color:#1c1917}
+.site-brand-mark{display:none}
+.site-brand-name{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:1.35rem;font-weight:600;letter-spacing:-.01em;line-height:1}
+.site-brand-tag{display:none;margin-top:.15rem;font-size:.62rem;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#a8a29e}
+.site-header-actions{display:flex;align-items:center;gap:.45rem}
+.site-pill{display:inline-flex;align-items:center;justify-content:center;height:2.15rem;padding:0 .9rem;border-radius:999px;font-size:.78rem;font-weight:700;text-decoration:none}
+.site-pill-ghost{color:#44403c}
+.site-pill-solid{background:#1c1917;color:#fff}
+.site-menu-btn{display:grid;place-items:center;width:2.35rem;height:2.35rem;border-radius:999px;border:1px solid #e7e5e4;background:#fff;color:#1c1917;cursor:pointer}
+.site-nav-desk{display:none;align-items:center;gap:1.35rem}
+.site-nav-desk a{position:relative;font-size:.84rem;font-weight:600;color:#78716c;text-decoration:none;padding:.25rem 0;letter-spacing:.01em;transition:color .2s ease}
+.site-nav-desk a:hover{color:#1c1917}
+.site-nav-desk a::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1.5px;background:#1c1917;transform:scaleX(0);transform-origin:left;transition:transform .25s ease}
+.site-nav-desk a:hover::after{transform:scaleX(1)}
+.wa-fab{position:fixed;right:1rem;bottom:calc(1rem + env(safe-area-inset-bottom));z-index:60;display:grid;place-items:center;width:3.25rem;height:3.25rem;border-radius:999px;background:#25D366;color:#fff;box-shadow:0 12px 28px rgba(37,211,102,.35);text-decoration:none;transition:transform .2s ease,box-shadow .2s ease}
+.wa-fab:hover{transform:translateY(-2px);box-shadow:0 16px 32px rgba(37,211,102,.4)}
+.wa-fab svg{width:1.45rem;height:1.45rem}
+body.portal-app .wa-fab,body.home-lock .wa-fab{/* keep on home too */}
+@media (min-width:1024px){
+  .site-header-inner{height:4rem}
+  .site-brand-mark{display:grid;place-items:center;width:2.35rem;height:2.35rem;border-radius:999px;background:#1c1917;color:#fafaf9}
+  .site-brand-name{font-size:1.55rem}
+  .site-brand-tag{display:block}
+  .site-nav-desk{display:flex}
+  .site-menu-btn{display:none}
+  .site-pill{height:2.4rem;padding:0 1.05rem;font-size:.82rem}
+}
 body.portal-app{min-height:100svh}
 .portal-shell{min-height:100svh;display:flex;flex-direction:column}
 .portal-top{position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:.75rem;height:3.25rem;padding:0 .85rem;border-bottom:1px solid #e7e5e4;background:rgba(255,255,255,.92);backdrop-filter:blur(10px)}
 .portal-brand{display:flex;align-items:center;gap:.55rem;min-width:0;text-decoration:none;color:#1c1917}
 .portal-brand-mark{display:grid;place-items:center;width:1.85rem;height:1.85rem;border-radius:.55rem;background:#1c1917;color:#fafaf9}
-.portal-brand-name{font-family:"Cormorant Garamond",ui-serif,Georgia,serif;font-size:1.2rem;font-weight:600;letter-spacing:.02em;line-height:1}
+.portal-brand-name{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:1.2rem;font-weight:600;letter-spacing:.02em;line-height:1}
 .portal-brand-sub{display:block;margin-top:.1rem;font-size:.62rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#a8a29e}
 .portal-top-actions{display:flex;align-items:center;gap:.4rem}
 .portal-chip{display:inline-flex;align-items:center;border-radius:999px;border:1px solid #e7e5e4;background:#fff;padding:.35rem .7rem;font-size:.72rem;font-weight:700;color:#44403c;text-decoration:none}
@@ -1578,15 +1736,14 @@ body.portal-app{min-height:100svh}
 }
 </style></head><body class="'.$bodyClass.'">'.$nav.'<main>'.$flashBlock;
         $footer = ($isHome || $isPortal) ? '' : '<footer class="border-t border-stone-200 mt-16 bg-white"><div class="max-w-6xl mx-auto px-4 py-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"><div><p class="font-display text-2xl font-semibold tracking-wide text-stone-950">'.$appName.'</p><p class="mt-1 text-sm text-stone-500">Photography · Videography · Client portal</p></div><div class="text-sm text-stone-500 space-y-1 sm:text-right"><p>'.htmlspecialchars($this->config['momo_number']??'').'</p><p>© '.date('Y').' '.htmlspecialchars($this->config['photographer_name']??'Photography Studio').'</p></div></div></footer>';
-        echo $content.'</main>'.$footer.'</body></html>';
+                $fab = $isPortal ? '' : $this->whatsappFab();
+        echo $content.'</main>'.$footer.$fab.'</body></html>';
     }
 
     private function topNav(bool $home = false): string
     {
         unset($home);
         $name=htmlspecialchars($this->config['app_name']??'LensFlow');
-        $phone=htmlspecialchars($this->config['momo_number']??'');
-        $phoneHref=preg_replace('/\s+/','',$this->config['momo_number']??'');
         $homeUrl=$this->url('/');
         $wedding=$this->url('/packages/wedding');
         $baby=$this->url('/packages/baby');
@@ -1594,86 +1751,59 @@ body.portal-app{min-height:100svh}
         $packages=$this->url('/packages');
 
         if(!$this->user){
-            $authDesktop='<a href="'.$this->url('/login').'" class="hidden sm:inline text-sm font-semibold text-stone-600 hover:text-stone-950">Log in</a><a href="'.$this->url('/register').'" class="inline-flex items-center rounded-full bg-stone-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-stone-800 transition">Book now</a>';
-            $authMobile='<a href="'.$this->url('/login').'" class="block rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800">Log in</a><a href="'.$this->url('/register').'" class="block rounded-2xl bg-stone-950 px-4 py-3 text-center text-sm font-semibold text-white">Book now</a>';
+            $authDesk='<a href="'.$this->url('/login').'" class="site-pill site-pill-ghost hidden sm:inline-flex">Log in</a><a href="'.$this->url('/register').'" class="site-pill site-pill-solid">Book</a>';
+            $authMob='<a href="'.$this->url('/login').'" class="block rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800">Log in</a><a href="'.$this->url('/register').'" class="block rounded-2xl bg-stone-950 px-4 py-3 text-center text-sm font-semibold text-white">Book a shoot</a>';
         }else{
             $portal=$this->user['role']==='admin'?'/admin':'/client/dashboard';
-            $portalLabel=$this->user['role']==='admin'?'Admin':'My portal';
-            $authDesktop='<a href="'.$this->url($portal).'" class="hidden sm:inline text-sm font-semibold text-stone-600 hover:text-stone-950">'.$portalLabel.'</a><a href="'.$this->url('/logout').'" class="inline-flex items-center rounded-full border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-800 hover:border-stone-400 transition">Log out</a>';
-            $authMobile='<a href="'.$this->url($portal).'" class="block rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800">'.$portalLabel.'</a><a href="'.$this->url('/logout').'" class="block rounded-2xl bg-stone-950 px-4 py-3 text-center text-sm font-semibold text-white">Log out</a>';
+            $portalLabel=$this->user['role']==='admin'?'Admin':'Portal';
+            $authDesk='<a href="'.$this->url($portal).'" class="site-pill site-pill-ghost hidden sm:inline-flex">'.$portalLabel.'</a><a href="'.$this->url('/logout').'" class="site-pill site-pill-solid">Log out</a>';
+            $authMob='<a href="'.$this->url($portal).'" class="block rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800">'.$portalLabel.'</a><a href="'.$this->url('/logout').'" class="block rounded-2xl bg-stone-950 px-4 py-3 text-center text-sm font-semibold text-white">Log out</a>';
         }
 
-        $navIcon = function(string $kind): string {
-            if ($kind === 'home') {
-                return '<svg class="site-nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5Z"/></svg>';
-            }
-            if ($kind === 'packages') {
-                return '<svg class="site-nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 7.5h16M7 4.5h10M6 7.5v10.5A1.5 1.5 0 0 0 7.5 19.5h9a1.5 1.5 0 0 0 1.5-1.5V7.5"/><path d="M10 11.5h4M10 15h4"/></svg>';
-            }
-            return str_replace('class="h-5 w-5"', 'class="site-nav-ico"', $this->categoryIcon($kind, 'h-5 w-5'));
+        $mobileLink=function(string $href,string $label,string $meta){
+            return '<a href="'.$href.'" class="mobile-nav-link"><span class="mobile-nav-ico"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span><span><span>'.$label.'</span><span class="mobile-nav-meta">'.$meta.'</span></span></a>';
         };
 
-        $navLink = function(string $href, string $label, string $kind = '') use ($navIcon) {
-            $ico = $kind !== '' ? $navIcon($kind) : '';
-            return '<a href="'.$href.'" class="site-nav-link">'.$ico.'<span>'.$label.'</span></a>';
-        };
-
-        $mobileNav = function(string $href, string $label, string $meta, string $kind) {
-            if ($kind === 'packages') {
-                $ico = '<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7.5h16M7 4.5h10M6 7.5v10.5A1.5 1.5 0 0 0 7.5 19.5h9a1.5 1.5 0 0 0 1.5-1.5V7.5"/><path d="M10 11.5h4M10 15h4"/></svg>';
-            } elseif ($kind === 'home') {
-                $ico = '<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5Z"/></svg>';
-            } else {
-                $ico = $this->categoryIcon($kind, 'h-5 w-5');
-            }
-            return '<a href="'.$href.'" class="mobile-nav-link"><span class="mobile-nav-ico">'.$ico.'</span><span><span>'.$label.'</span><span class="mobile-nav-meta">'.$meta.'</span></span></a>';
-        };
-
-        $logo='<a href="'.$homeUrl.'" class="group flex items-center gap-3 min-w-0">
-          <span class="grid h-10 w-10 place-items-center rounded-full border border-stone-200 bg-stone-950 text-stone-100 shadow-sm">
-            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4.5 8.5h2.2l1.2-2h8.2l1.2 2H19.5A1.5 1.5 0 0 1 21 10v7.5A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5V10a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="12" cy="13.5" r="3.2"/></svg>
-          </span>
-          <span class="min-w-0 leading-tight">
-            <span class="font-display block text-[1.55rem] sm:text-[1.7rem] font-semibold tracking-[0.02em] text-stone-950 group-hover:text-stone-800 transition">'.$name.'</span>
-            <span class="hidden sm:block text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-500">Photography studio</span>
-          </span>
-        </a>';
-
-        return '<header class="sticky top-0 z-50 border-b border-stone-200/90 bg-white/90 backdrop-blur-md">
-          <div class="max-w-6xl mx-auto px-4">
-            <div class="relative flex h-[4.25rem] items-center justify-between gap-4">
-              '.$logo.'
-              <nav class="hidden lg:flex items-center gap-7" aria-label="Primary">
-                '.$navLink($wedding,'Weddings','wedding').'
-                '.$navLink($baby,'Baby days','baby').'
-                '.$navLink($studio,'Studio','studio').'
-                '.$navLink($packages,'Browse all','packages').'
-              </nav>
-              <div class="flex items-center gap-3">
-                <a href="tel:'.$phoneHref.'" class="lg:hidden grid h-10 w-10 place-items-center rounded-full border border-stone-200 bg-white text-stone-700" aria-label="Call studio">
-                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6.6 10.8c1.7 3.3 3.9 5.5 7.2 7.2l2.4-2.4c.3-.3.8-.4 1.2-.2 1.3.4 2.7.7 4.1.7.7 0 1.2.5 1.2 1.2V21c0 .7-.5 1.2-1.2 1.2C10.8 22.2 1.8 13.2 1.8 2.2 1.8 1.5 2.3 1 3 1h3.7c.7 0 1.2.5 1.2 1.2 0 1.4.2 2.8.7 4.1.1.4 0 .9-.3 1.2L6.6 10.8Z"/></svg>
-                </a>
-                <div class="hidden sm:flex items-center gap-3">'.$authDesktop.'</div>
-                <input type="checkbox" id="site-menu" class="peer sr-only" aria-hidden="true">
-                <label for="site-menu" class="lg:hidden grid h-10 w-10 place-items-center rounded-full border border-stone-200 bg-white text-stone-800 cursor-pointer" aria-label="Open menu">
-                  <svg class="icon-open h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-                  <svg class="icon-close h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-                </label>
-                <div class="mobile-panel absolute left-0 right-0 top-[calc(100%+0.75rem)] z-50 rounded-[1.5rem] border border-stone-200 bg-white p-3 shadow-xl shadow-stone-900/10 lg:hidden">
-                  <nav class="space-y-1" aria-label="Mobile">
-                    '.$mobileNav($homeUrl,'Home','Studio overview','home').'
-                    '.$mobileNav($wedding,'Weddings','Engagements & celebrations','wedding').'
-                    '.$mobileNav($baby,'Baby days','Dedication & christening','baby').'
-                    '.$mobileNav($studio,'Studio','Portrait sessions','studio').'
-                    '.$mobileNav($packages,'Browse all','Every package in one place','packages').'
-                  </nav>
-                  <div class="mt-3 grid gap-2 border-t border-stone-100 pt-3">'.$authMobile.'</div>
-                  <a href="tel:'.$phoneHref.'" class="mt-3 flex items-center justify-center gap-2 rounded-2xl bg-stone-100 px-4 py-3 text-sm font-semibold text-stone-800">Call '.$phone.'</a>
-                </div>
+        return '<header class="site-header">
+          <div class="site-header-inner relative">
+            <a href="'.$homeUrl.'" class="site-brand">
+              <span class="site-brand-mark"><svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4.5 8.5h2.2l1.2-2h8.2l1.2 2H19.5A1.5 1.5 0 0 1 21 10v7.5A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5V10a1.5 1.5 0 0 1 1.5-1.5Z"/><circle cx="12" cy="13.5" r="3.2"/></svg></span>
+              <span><span class="site-brand-name">'.$name.'</span><span class="site-brand-tag">Photography studio</span></span>
+            </a>
+            <nav class="site-nav-desk" aria-label="Primary">
+              <a href="'.$wedding.'">Weddings</a>
+              <a href="'.$baby.'">Baby</a>
+              <a href="'.$studio.'">Studio</a>
+              <a href="'.$packages.'">Packages</a>
+            </nav>
+            <div class="site-header-actions">
+              '.$authDesk.'
+              <input type="checkbox" id="site-menu" class="peer sr-only" aria-hidden="true">
+              <label for="site-menu" class="site-menu-btn lg:hidden" aria-label="Open menu">
+                <svg class="icon-open h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+                <svg class="icon-close h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </label>
+              <div class="mobile-panel absolute left-0 right-0 top-[calc(100%+0.55rem)] z-50 rounded-[1.25rem] border border-stone-200 bg-white p-3 shadow-xl shadow-stone-900/10">
+                <nav class="space-y-1" aria-label="Mobile">
+                  '.$mobileLink($homeUrl,'Home','Studio overview').'
+                  '.$mobileLink($wedding,'Weddings','Engagements & celebrations').'
+                  '.$mobileLink($baby,'Baby days','Dedication & christening').'
+                  '.$mobileLink($studio,'Studio','Portrait sessions').'
+                  '.$mobileLink($packages,'Packages','Browse every offer').'
+                </nav>
+                <div class="mt-3 grid gap-2 border-t border-stone-100 pt-3">'.$authMob.'</div>
               </div>
             </div>
           </div>
         </header>';
+    }
+
+    private function whatsappFab(): string
+    {
+        $raw = preg_replace('/\D+/', '', (string)($this->config['whatsapp_number'] ?? '0541069241')) ?? '0541069241';
+        if (str_starts_with($raw, '0')) $raw = '233'.substr($raw, 1);
+        $href = 'https://wa.me/'.$raw;
+        return '<a class="wa-fab" href="'.htmlspecialchars($href).'" target="_blank" rel="noopener noreferrer" aria-label="Chat on WhatsApp" title="Chat on WhatsApp"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.5 3.5A10.5 10.5 0 0 0 3.4 17.7L2.5 21.5l3.9-.9A10.5 10.5 0 1 0 20.5 3.5Zm-8.5 16a8.7 8.7 0 0 1-4.4-1.2l-.3-.2-2.6.7.7-2.5-.2-.3a8.7 8.7 0 1 1 6.8 3.5Zm4.8-6.5c-.3-.1-1.6-.8-1.8-.9s-.4-.1-.6.1-.7.9-.8 1-.3.2-.6.1a7.1 7.1 0 0 1-2.1-1.3 7.8 7.8 0 0 1-1.4-1.8c-.2-.3 0-.4.1-.6l.4-.5c.1-.1.2-.3.3-.4s0-.3 0-.4-.6-1.5-.8-2-.2-.4-.5-.4h-.4c-.2 0-.4.1-.6.3s-.8.8-.8 1.9.8 2.2.9 2.3a9.4 9.4 0 0 0 3.5 3.2c1.4.7 1.8.7 2.2.6s1.3-.5 1.5-1 .2-.9.1-1-.2-.2-.5-.3Z"/></svg></a>';
     }
 
     private function clientShell(string $title, string $content): string

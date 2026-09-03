@@ -11,6 +11,7 @@ return [
     'momo_number' => '0240000000',
     'momo_network' => 'MTN',
     'momo_account_name' => 'Your Studio Name',
+    'whatsapp_number' => '0541069241',
 
     // Database. SQLite is the default for simple deployment.
     'database' => [
