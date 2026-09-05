@@ -348,6 +348,8 @@ SQL;
         $this->syncWeddingPackages();
 
         $this->syncAdminAccount();
+        $defaultWeddingContract = $this->defaultWeddingContractText();
+        $defaultGeneralContract = $this->defaultGeneralContractText();
 
         $defaults = [
             'app_name' => 'iBuk.online',
@@ -376,7 +378,8 @@ SQL;
             'cat_studio_blurb' => 'Professional studio portrait sessions.',
             'wedding_booking_percent' => '80',
             'wedding_balance_percent' => '20',
-            'contract_text' => "PHOTO / VIDEO SERVICE AGREEMENT\n\nThis agreement is between the Studio and the Client named in this booking.\n\n1. Scope of coverage\nThe Studio will provide the photography services, videography services, or combined coverage selected in the booked package, subject to the event details confirmed in the portal.\n\n2. Booking confirmation\nA booking is treated as confirmed once the Client submits the booking, accepts this agreement, and the Studio verifies the required payment or agreed first installment.\n\n3. Payments and balance\nPackage pricing, discounts, add-ons, and any prior-payment notes shown in the portal form part of this agreement. Partial payments may be accepted, but any outstanding balance must be cleared before final edited images, videos, albums, frames, or other deliverables are released, unless the Studio agrees otherwise in writing.\n\n4. Rescheduling and delays\nThe Client should notify the Studio as early as possible about date, venue, or schedule changes. The Studio will make reasonable efforts to accommodate changes, but availability for a new date is not guaranteed.\n\n5. Creative coverage and editing\nThe Client hires the Studio for its professional judgment, shooting style, and editing approach. The Studio will make reasonable efforts to capture key moments, but exact poses, people, or scenes cannot be guaranteed in every live event situation.\n\n6. Delivery timeline\nEstimated turnaround depends on the package selected, the scope of coverage, and production workload. The portal timeline and package turnaround guide the expected delivery window, but the Studio may reasonably extend delivery where necessary for editing quality, technical recovery, or circumstances beyond its control.\n\n7. Copyright and usage\nCopyright in all photographs, videos, raw files, and edited deliverables remains with the Studio unless otherwise agreed in writing. The Client receives personal-use rights for delivered files. Commercial, resale, or third-party promotional use requires the Studio's prior written consent.\n\n8. Client cooperation\nThe Client is responsible for providing accurate event details, securing venue permissions where required, keeping to agreed timelines, and ensuring a safe working environment for the Studio team and equipment.\n\n9. Cancellation and non-refund policy\nPayments already verified by the Studio are non-refundable once the date has been reserved and work has been scheduled, except where the Studio cancels and cannot provide the agreed service or an acceptable alternative.\n\n10. Limitation of liability\nIf equipment failure, illness, accident, force majeure, restricted venue access, or other events beyond the Studio's reasonable control prevent full performance, the Studio's liability is limited to amounts paid for the affected service portion, unless another remedy is agreed in writing.\n\n11. Acceptance\nBy accepting this agreement in the portal, the Client confirms that the booking summary, package details, payment terms, and portal record are correct and agrees to be bound by this service agreement.",
+            'contract_text' => $defaultWeddingContract,
+            'general_contract_text' => $defaultGeneralContract,
             'cheat_sheet_text' => "SESSION CHEAT SHEET\n\n• Confirm your booking details and preferred time with the studio.\n• Pay via MTN MoMo using your booking reference — you can pay in parts.\n• Arrive on time with outfits/props ready for the shoot.\n• Soft copies and package items are released after payment is cleared.\n• Message the studio on WhatsApp if anything changes.",
             'studio_note' => "After payment verification, your booking becomes active. Complete the service agreement in the portal, then follow every stage on your timeline.",
             'studio_signer_name' => 'iBuk.online Studio',
@@ -403,8 +406,12 @@ SQL;
         }
         $legacyContract = "PHOTOGRAPHY SERVICE AGREEMENT (Wedding & Engagement)\n\nThis agreement is between the Studio and the Client named in this booking.\n\n1. Booking confirmation\nThe Client confirms the selected package, event details and pricing shown in the portal.\n\n2. Payments\nWedding & engagement bookings follow the payment schedule shown in the portal. Partial payments are allowed. Work is scheduled after the booking payment is verified. Final deliverables remain subject to clearing the remaining balance unless otherwise agreed in writing.\n\n3. Schedule & delivery\nEstimated turnaround follows the package terms and the project timeline in the portal. Dates may shift by mutual agreement.\n\n4. Usage & ownership\nThe Studio retains copyright in the images. The Client receives personal-use soft copies as listed in the package. Commercial use requires prior written consent.\n\n5. Cancellation\nVerified booking payments are non-refundable, except where the Studio cancels the booking.\n\n6. Acceptance\nBy accepting this agreement in the portal, the Client agrees to these terms.";
         $currentContract = $this->setting('contract_text');
-        if ($currentContract === '' || $currentContract === $legacyContract) {
+        if ($currentContract === '' || $currentContract === $legacyContract || $currentContract === $defaultGeneralContract) {
             $refreshStmt->execute(['contract_text', $defaults['contract_text']]);
+        }
+        $currentGeneralContract = $this->setting('general_contract_text');
+        if ($currentGeneralContract === '' || $currentGeneralContract === $legacyContract) {
+            $refreshStmt->execute(['general_contract_text', $defaults['general_contract_text']]);
         }
         $this->db->prepare("UPDATE timeline_templates SET description=? WHERE title='2 · Confirm terms' AND (description='Wedding/engagement: sign contract. Other shoots: acknowledge cheat sheet.' OR description='Accept the contract or cheat sheet, then get ready for the shoot.')")
             ->execute(['Review and accept the service agreement, then get ready for the shoot.']);
@@ -2480,8 +2487,9 @@ SQL;
 
         <div data-settings-panel="contract" class="settings-panel hidden space-y-5">
           <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
-            <div><h2 class="font-black">Contracts &amp; client terms</h2><p class="mt-1 text-sm text-stone-500">This agreement is shown in the client portal before a booking is fully accepted.</p></div>
-            '.$this->textarea('contract_text','Standard service agreement','Main contract used for photography, videography, weddings, engagements and other shoots',$this->cfg('contract_text',''),10,'').'
+            <div><h2 class="font-black">Contracts &amp; client terms</h2><p class="mt-1 text-sm text-stone-500">Wedding bookings use the Ghana wedding and traditional engagement agreement. Other shoots use the general service agreement.</p></div>
+            '.$this->textarea('contract_text','Wedding & traditional engagement agreement','Main contract for weddings and engagements',$this->cfg('contract_text',''),18,'').'
+            '.$this->textarea('general_contract_text','General photo / video agreement','Contract for studio, baby, birthday and other non-wedding shoots',$this->cfg('general_contract_text',$this->defaultGeneralContractText()),12,'').'
             '.$this->textarea('cheat_sheet_text','Optional session notes','Optional extra prep notes for your own internal use or future expansion',$this->cfg('cheat_sheet_text',''),6,'').'
             '.$this->textarea('studio_note','Client portal note','Note shown on the client dashboard',$this->cfg('studio_note',''),3,'').'
           </section>
@@ -2563,7 +2571,7 @@ SQL;
             'cat_baby_label','cat_baby_short','cat_baby_blurb',
             'cat_studio_label','cat_studio_short','cat_studio_blurb',
             'wedding_booking_percent','wedding_balance_percent',
-            'contract_text','cheat_sheet_text','studio_note',
+            'contract_text','general_contract_text','cheat_sheet_text','studio_note',
             'sms_provider','sms_sender','sms_arkesel_api_key','sms_moolre_vas_key','sms_unit_cost','otp_sms_template',
         ];
         $stmt = $this->db->prepare("INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
@@ -2818,6 +2826,148 @@ SQL;
         return true;
     }
 
+    private function defaultGeneralContractText(): string
+    {
+        return <<<'TEXT'
+PHOTO / VIDEO SERVICE AGREEMENT
+
+This agreement is between the Studio and the Client named in this booking.
+
+1. Scope of coverage
+The Studio will provide the photography services, videography services, or combined coverage selected in the booked package, subject to the event details confirmed in the portal.
+
+2. Booking confirmation
+A booking is treated as confirmed once the Client submits the booking, accepts this agreement, and the Studio verifies the required payment or agreed first installment.
+
+3. Payments and balance
+Package pricing, discounts, add-ons, and any prior-payment notes shown in the portal form part of this agreement. Partial payments may be accepted, but any outstanding balance must be cleared before final edited images, videos, albums, frames, or other deliverables are released, unless the Studio agrees otherwise in writing.
+
+4. Rescheduling and delays
+The Client should notify the Studio as early as possible about date, venue, or schedule changes. The Studio will make reasonable efforts to accommodate changes, but availability for a new date is not guaranteed.
+
+5. Creative coverage and editing
+The Client hires the Studio for its professional judgment, shooting style, and editing approach. The Studio will make reasonable efforts to capture key moments, but exact poses, people, or scenes cannot be guaranteed in every live event situation.
+
+6. Delivery timeline
+Estimated turnaround depends on the package selected, the scope of coverage, and production workload. The portal timeline and package turnaround guide the expected delivery window, but the Studio may reasonably extend delivery where necessary for editing quality, technical recovery, or circumstances beyond its control.
+
+7. Copyright and usage
+Copyright in all photographs, videos, raw files, and edited deliverables remains with the Studio unless otherwise agreed in writing. The Client receives personal-use rights for delivered files. Commercial, resale, or third-party promotional use requires the Studio's prior written consent.
+
+8. Client cooperation
+The Client is responsible for providing accurate event details, securing venue permissions where required, keeping to agreed timelines, and ensuring a safe working environment for the Studio team and equipment.
+
+9. Cancellation and non-refund policy
+Payments already verified by the Studio are non-refundable once the date has been reserved and work has been scheduled, except where the Studio cancels and cannot provide the agreed service or an acceptable alternative.
+
+10. Limitation of liability
+If equipment failure, illness, accident, force majeure, restricted venue access, or other events beyond the Studio's reasonable control prevent full performance, the Studio's liability is limited to amounts paid for the affected service portion, unless another remedy is agreed in writing.
+
+11. Acceptance
+By accepting this agreement in the portal, the Client confirms that the booking summary, package details, payment terms, and portal record are correct and agrees to be bound by this service agreement.
+TEXT;
+    }
+
+    private function defaultWeddingContractText(): string
+    {
+        return <<<'TEXT'
+WEDDING & TRADITIONAL ENGAGEMENT SERVICES AGREEMENT
+Republic of Ghana
+
+This Wedding and Traditional Engagement Services Agreement is made between the Client named in this booking and the Service Provider identified by the Studio settings and booking record.
+
+1. Parties
+The Client may include one or two principal clients for the wedding or engagement. Where both clients proceed under one booking, payment obligations and approved charges are treated as joint unless otherwise agreed in writing.
+
+2. Purpose
+The Client appoints the Service Provider to provide wedding, traditional engagement, photography, videography, coordination, planning, decoration, logistics, production, and related event services described in the booked package, approved add-ons, and written updates.
+
+3. Event details
+Traditional engagement, wedding, reception, venue, date, programme, and related details are those shown in the booking summary, package notes, portal record, and any later written update approved by the Parties.
+
+4. Term
+This Agreement begins once accepted and continues until the contracted services are completed, all outstanding amounts are paid, and agreed post-event deliverables are finished, unless terminated earlier under this Agreement.
+
+5. Scope of services
+Only the services included in the booked package, accepted add-ons, and later approved written changes form part of this Agreement. Services not expressly included are treated as additional services.
+
+6. Traditional engagement and customary items
+Where the Service Provider assists with a Ghanaian traditional engagement or customary ceremony, the families remain responsible for confirming the applicable customs, family lists, and required customary items. The Service Provider is not responsible for disputes concerning bridewealth, dowry, gifts, customary validity, or traditional obligations.
+
+7. Budget and price
+The package total, discounts, coupons, add-ons, prior-payment notes, and payment schedule displayed in the portal form part of the agreed financial record. Additional approved work, schedule extensions, material guest-count changes, venue changes, or third-party cost increases may result in extra charges.
+
+8. Payment schedule
+The booking payment, later instalments, and final balance are governed by the portal summary and any written update approved by the Parties. Unless otherwise agreed, the outstanding balance should be cleared before final delivery and, where required by the package, before the event date.
+
+9. Method of payment
+Payments may be made through approved channels such as mobile money, bank transfer, card, or another method accepted by the Service Provider. The Client should use the booking reference or payment reference supplied by the portal.
+
+10. Booking fee / retainer
+Any booking fee or reservation payment secures the date and allows planning or preparation to begin. Where identified as non-refundable, it may be retained to the extent permitted by law and to cover date reservation, administrative time, and non-recoverable commitments already made.
+
+11. Additional services and change orders
+Requests outside the agreed scope must be approved in writing. WhatsApp, email, or another written electronic channel may be used for minor approved changes. Major changes affecting date, venue, total price, or principal scope should be clearly recorded.
+
+12. Guest count and programme changes
+The Client must provide timely updates on guest count, programme flow, venues, and timing. Additional guests, venue restrictions, or programme delays may affect pricing, staffing, logistics, and delivery.
+
+13. Vendor management
+Where the Service Provider coordinates third-party vendors as part of the package, the Service Provider will manage them within the agreed scope. Vendors contracted directly by the Client remain responsible for their own services.
+
+14. Venue, permits, and compliance
+The Client remains responsible for disclosing venue rules, access conditions, and any known restrictions. The Parties must comply with applicable Ghanaian law, venue requirements, and local authority rules relating to noise, access, structures, sanitation, and public safety.
+
+15. Weather, power, and outdoor risk
+Outdoor events carry risks including rain, wind, flooding, dust, heat, transport disruption, and power interruption. Where the Service Provider recommends a reasonable backup or contingency plan and the Client declines it, the Service Provider is not responsible for losses that reasonably result from that decision.
+
+16. Timeline and overtime
+Delays caused by the Client, family members, officiants, guests, venues, traffic, or client-appointed vendors may affect programme timing and may result in overtime charges or reduced coverage opportunities.
+
+17. Photography and videography
+Where media coverage is included, the relevant hours, deliverables, turnaround expectations, drone use, and whether raw files are included are determined by the booked package and approved add-ons. The Service Provider will use reasonable skill and care but cannot guarantee capture of every moment, person, pose, or scene in a live event environment.
+
+18. Copyright, usage, and marketing consent
+Copyright in photographs, videos, raw files, edits, and creative materials remains with the Service Provider unless otherwise agreed in writing. On full payment, the Client receives normal personal-use rights for delivered work. Commercial use requires prior written consent. Marketing or portfolio use should follow the Client's selected privacy preference and any applicable law.
+
+19. Privacy and confidentiality
+Client names, phone numbers, addresses, payment records, event details, and related personal information should be handled with reasonable confidentiality and in line with applicable Ghanaian data-protection requirements.
+
+20. Client responsibilities
+The Client must provide accurate information, pay on time, disclose venue restrictions, communicate family and ceremony requirements, identify authorised decision-makers, inform the Service Provider of separate vendors, and avoid unlawful or unsafe instructions.
+
+21. Service Provider responsibilities
+The Service Provider shall perform the agreed services with reasonable skill, care, professionalism, and timely communication, while taking reasonable steps to coordinate included vendors and manage the event within the approved scope.
+
+22. Cancellation by Client
+Cancellation must be communicated in writing. The Service Provider may retain the booking fee and non-refundable third-party commitments already incurred, with any additional refund position depending on timing, work completed, supplier policies, and applicable law.
+
+23. Rescheduling
+Rescheduling requests must be made in writing and are subject to availability, venue constraints, vendor availability, revised pricing, and any additional costs reasonably caused by the change.
+
+24. Cancellation by Service Provider
+The Service Provider may terminate for material non-payment, serious abuse, safety threats, illegal instructions, denied access, or another material breach that makes performance unreasonable or unsafe. If the Service Provider cancels without Client fault and outside force majeure, payments for unperformed services should be refunded subject to committed third-party costs and applicable law.
+
+25. Force majeure
+Neither Party is treated as in breach to the extent performance is prevented by extraordinary events beyond reasonable control, including severe weather, public-health restrictions, civil unrest, venue closure, major utility failure, or similar events. The Parties should first try to reduce loss through rescheduling, substitutions, or a revised plan.
+
+26. Liability
+Each Party remains responsible for loss caused by its own breach, negligence, wilful misconduct, or unlawful act. To the extent permitted by law, the Service Provider is not liable for indirect or unforeseeable loss, and liability may be limited to amounts actually paid for the affected services except where law does not allow exclusion.
+
+27. Electronic communication and signatures
+The Parties may use email, WhatsApp, the client portal, or another written electronic channel for notices, approvals, and record-keeping where the communication can reasonably be identified and retained. Electronic acceptance in the portal forms part of the contractual record.
+
+28. Governing law
+This Agreement is governed by the laws of the Republic of Ghana.
+
+29. Priority of records
+If there is any conflict, priority is given to approved special conditions or written change orders first, then this Agreement, then the booking summary, package description, payment record, and other approved written communications.
+
+30. Acceptance
+By accepting this agreement in the portal, the Client confirms that the booking summary, package details, event information, payment terms, and related records are materially correct and agrees to be bound by this Agreement.
+TEXT;
+    }
+
     private function contractFormHtml(array $booking): string
     {
         $total = (float)$booking['total'];
@@ -2828,13 +2978,14 @@ SQL;
         $category = (string)($booking['package_category'] ?? $booking['category'] ?? '');
         $eventType = trim((string)($booking['event_type'] ?? '')) ?: 'Photo / video service';
         $coverage = $this->packageCoverageLabel($booking);
-        $contractText = $this->setting('contract_text');
+        $isWeddingContract = $category === 'wedding' || str_contains(strtolower($eventType), 'wedding') || str_contains(strtolower($eventType), 'engagement');
+        $contractText = $this->setting($isWeddingContract ? 'contract_text' : 'general_contract_text');
         if ($contractText === '') {
-            $contractText = "PHOTO / VIDEO SERVICE AGREEMENT\n\nThis agreement is between the Studio and the Client named in this booking.\n\n1. Scope of coverage\nThe Studio will provide the photography services, videography services, or combined coverage selected in the booked package, subject to the event details confirmed in the portal.\n\n2. Booking confirmation\nA booking is treated as confirmed once the Client submits the booking, accepts this agreement, and the Studio verifies the required payment or agreed first installment.\n\n3. Payments and balance\nPackage pricing, discounts, add-ons, and any prior-payment notes shown in the portal form part of this agreement. Partial payments may be accepted, but any outstanding balance must be cleared before final edited images, videos, albums, frames, or other deliverables are released, unless the Studio agrees otherwise in writing.\n\n4. Rescheduling and delays\nThe Client should notify the Studio as early as possible about date, venue, or schedule changes. The Studio will make reasonable efforts to accommodate changes, but availability for a new date is not guaranteed.\n\n5. Creative coverage and editing\nThe Client hires the Studio for its professional judgment, shooting style, and editing approach. The Studio will make reasonable efforts to capture key moments, but exact poses, people, or scenes cannot be guaranteed in every live event situation.\n\n6. Delivery timeline\nEstimated turnaround depends on the package selected, the scope of coverage, and production workload. The portal timeline and package turnaround guide the expected delivery window, but the Studio may reasonably extend delivery where necessary for editing quality, technical recovery, or circumstances beyond its control.\n\n7. Copyright and usage\nCopyright in all photographs, videos, raw files, and edited deliverables remains with the Studio unless otherwise agreed in writing. The Client receives personal-use rights for delivered files. Commercial, resale, or third-party promotional use requires the Studio's prior written consent.\n\n8. Client cooperation\nThe Client is responsible for providing accurate event details, securing venue permissions where required, keeping to agreed timelines, and ensuring a safe working environment for the Studio team and equipment.\n\n9. Cancellation and non-refund policy\nPayments already verified by the Studio are non-refundable once the date has been reserved and work has been scheduled, except where the Studio cancels and cannot provide the agreed service or an acceptable alternative.\n\n10. Limitation of liability\nIf equipment failure, illness, accident, force majeure, restricted venue access, or other events beyond the Studio's reasonable control prevent full performance, the Studio's liability is limited to amounts paid for the affected service portion, unless another remedy is agreed in writing.\n\n11. Acceptance\nBy accepting this agreement in the portal, the Client confirms that the booking summary, package details, payment terms, and portal record are correct and agrees to be bound by this service agreement.";
+            $contractText = $isWeddingContract ? $this->defaultWeddingContractText() : $this->defaultGeneralContractText();
         }
         return '<div class="rounded-3xl border border-slate-200 bg-white p-5">
-          <h3 class="font-black">Service agreement</h3>
-          <p class="mt-1 text-sm text-stone-500">Standard contract for photography, videography, weddings, engagements, portraits, baby events, and other booked sessions.</p>
+          <h3 class="font-black">'.($isWeddingContract ? 'Wedding &amp; traditional engagement agreement' : 'Service agreement').'</h3>
+          <p class="mt-1 text-sm text-stone-500">'.($isWeddingContract ? 'Standard Ghana wedding and traditional engagement terms adapted for your booked package.' : 'Standard contract for photography, videography, portraits, baby events, and other booked sessions.').'</p>
           <div class="mt-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div class="rounded-2xl bg-stone-50 p-4"><p class="text-[10px] font-bold uppercase tracking-wider text-stone-400">Service type</p><p class="mt-1 text-sm font-black text-stone-950">'.htmlspecialchars($eventType).'</p></div>
             <div class="rounded-2xl bg-stone-50 p-4"><p class="text-[10px] font-bold uppercase tracking-wider text-stone-400">Coverage</p><p class="mt-1 text-sm font-black text-stone-950">'.htmlspecialchars($coverage).'</p></div>
