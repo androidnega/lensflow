@@ -2381,77 +2381,160 @@ SQL;
         $this->requireRole('admin');
         $bookingPct = (string)(int)$this->weddingBookingPercent();
         $balancePct = (string)max(0, 100 - (int)$bookingPct);
-        $body = '<form method="post" action="'.$this->url('/dashboard/settings').'" class="space-y-5 max-w-3xl">'.$this->csrfField().'
-
-        <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
-          <div><h2 class="font-black">Studio identity</h2><p class="mt-1 text-sm text-stone-500">Brand name shown in the header, portals and messages.</p></div>
-          <div class="grid sm:grid-cols-2 gap-4">'.$this->input('app_name','App / brand name','text',$this->cfg('app_name','iBuk.online'),'Studio brand name').$this->input('photographer_name','Photographer / studio name','text',$this->cfg('photographer_name',''),'Photographer name').'</div>
-        </section>
-
-        <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
-          <div><h2 class="font-black">Payments &amp; WhatsApp</h2><p class="mt-1 text-sm text-stone-500">Shown on MoMo instructions and the chat button (number stays hidden on the site).</p></div>
-          <div class="grid sm:grid-cols-2 gap-4">'.$this->input('momo_network','MoMo network','text',$this->cfg('momo_network','MTN'),'MTN').$this->input('momo_number','MoMo number','tel',$this->cfg('momo_number',''),'e.g. 0541069241').$this->input('momo_account_name','MoMo account name','text',$this->cfg('momo_account_name',''),'Account name on MoMo').$this->input('whatsapp_number','WhatsApp number','tel',$this->cfg('whatsapp_number','0541069241'),'e.g. 0541069241').'</div>
-        </section>
-
-        <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
-          <div><h2 class="font-black">Homepage copy</h2><p class="mt-1 text-sm text-stone-500">Text on the main landing page. Slides are managed under Homepage.</p></div>
-          '.$this->input('home_headline','Headline','text',$this->cfg('home_headline','Beauty, held still.'),'Main homepage headline').'
-          '.$this->input('home_title','Supporting title','text',$this->cfg('home_title','Weddings, portraits, and days worth keeping.'),'Short supporting line').'
-          '.$this->textarea('home_lead','Lead paragraph','Short paragraph under the title',$this->cfg('home_lead','Book a session in minutes. Pay with MoMo. Follow every step in one quiet place.'),3,'').'
-          '.$this->input('home_cta','Button label','text',$this->cfg('home_cta','Explore packages'),'Homepage button text').'
-          <p class="text-xs text-stone-500"><a class="font-bold text-stone-800" href="'.$this->url('/dashboard/slides').'">Manage homepage slides →</a></p>
-        </section>
-
-        <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
-          <div><h2 class="font-black">Package categories</h2><p class="mt-1 text-sm text-stone-500">Labels and blurbs on package pages.</p></div>
-          <div class="grid sm:grid-cols-3 gap-4">
-            '.$this->input('cat_wedding_label','Wedding label','text',$this->cfg('cat_wedding_label','Wedding & Engagement'),'Category title').'
-            '.$this->input('cat_wedding_short','Wedding short','text',$this->cfg('cat_wedding_short','Wedding'),'Short label').'
-            '.$this->textarea('cat_wedding_blurb','Wedding blurb','Short category description',$this->cfg('cat_wedding_blurb',''),2,'').'
-            '.$this->input('cat_baby_label','Baby label','text',$this->cfg('cat_baby_label','Baby Dedication & Christening'),'Category title').'
-            '.$this->input('cat_baby_short','Baby short','text',$this->cfg('cat_baby_short','Baby'),'Short label').'
-            '.$this->textarea('cat_baby_blurb','Baby blurb','Short category description',$this->cfg('cat_baby_blurb',''),2,'').'
-            '.$this->input('cat_studio_label','Studio label','text',$this->cfg('cat_studio_label','Studio Shoot'),'Category title').'
-            '.$this->input('cat_studio_short','Studio short','text',$this->cfg('cat_studio_short','Studio'),'Short label').'
-            '.$this->textarea('cat_studio_blurb','Studio blurb','Short category description',$this->cfg('cat_studio_blurb',''),2,'').'
+        $provider = $this->smsProvider();
+        $arkConfigured = trim($this->cfg('sms_arkesel_api_key', '')) !== '';
+        $moolreConfigured = trim($this->cfg('sms_moolre_vas_key', '')) !== '';
+        $activeConfigured = $provider === 'log' ? true : ($provider === 'arkesel' ? $arkConfigured : $moolreConfigured);
+        $activeLabel = $provider === 'log' ? 'Dev log mode' : ucfirst($provider);
+        $activeState = $provider === 'log'
+            ? '<span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">No key needed</span>'
+            : ($activeConfigured
+                ? '<span class="rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700">Configured</span>'
+                : '<span class="rounded-full bg-amber-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-amber-700">Key needed</span>');
+        $body = '<form method="post" action="'.$this->url('/dashboard/settings').'" class="max-w-5xl space-y-5">'.$this->csrfField().'
+        <div class="rounded-[2rem] border border-stone-200 bg-white p-5 sm:p-6">
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">Settings</p>
+              <h1 class="mt-2 text-2xl font-black text-stone-950 sm:text-3xl">Keep everything simple</h1>
+              <p class="mt-2 max-w-2xl text-sm leading-6 text-stone-500">Use the tabs below to update your brand, payments, homepage, contract and SMS settings without a long crowded page.</p>
+            </div>
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:min-w-[26rem]">
+              <div class="rounded-2xl bg-stone-50 p-4"><p class="text-[11px] font-bold uppercase tracking-[0.16em] text-stone-400">Active SMS provider</p><p class="mt-2 text-sm font-black text-stone-950">'.htmlspecialchars($activeLabel).'</p><div class="mt-2">'.$activeState.'</div></div>
+              <div class="rounded-2xl bg-stone-50 p-4"><p class="text-[11px] font-bold uppercase tracking-[0.16em] text-stone-400">Arkesel key</p><p class="mt-2">'.($arkConfigured ? '<span class="rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700">Configured</span>' : '<span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-600">Not set</span>').'</p></div>
+              <div class="rounded-2xl bg-stone-50 p-4"><p class="text-[11px] font-bold uppercase tracking-[0.16em] text-stone-400">Moolre key</p><p class="mt-2">'.($moolreConfigured ? '<span class="rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700">Configured</span>' : '<span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-600">Not set</span>').'</p></div>
+            </div>
           </div>
-        </section>
+        </div>
 
-        <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
-          <div><h2 class="font-black">Wedding payment schedule</h2><p class="mt-1 text-sm text-stone-500">Shown as guidance inside the standard service agreement for wedding and engagement bookings. Clients can still pay in parts.</p></div>
-          <div class="grid sm:grid-cols-2 gap-4">'.$this->input('wedding_booking_percent','Booking payment %','number',$bookingPct,'e.g. 80').$this->input('wedding_balance_percent','Balance % (auto-filled hint)','number',$balancePct,'e.g. 20').'</div>
-          <p class="text-xs text-stone-500">Balance % is informational — the site uses booking % and treats the rest as balance.</p>
-        </section>
-
-        <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
-          <div><h2 class="font-black">Contracts &amp; client terms</h2></div>
-          '.$this->textarea('contract_text','Standard service agreement','Main contract used for photography, videography, weddings, engagements and other shoots',$this->cfg('contract_text',''),10,'').'
-          '.$this->textarea('cheat_sheet_text','Optional session notes','Optional extra prep notes for your own internal use or future expansion',$this->cfg('cheat_sheet_text',''),6,'').'
-          '.$this->textarea('studio_note','Client portal note','Note shown on the client dashboard',$this->cfg('studio_note',''),3,'').'
-        </section>
-
-        <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
-          <div><h2 class="font-black">SMS / OTP</h2><p class="mt-1 text-sm text-stone-500">Choose Arkesel or Moolre for live OTP delivery. Use {app} and {otp} in the template. “Log only” writes to storage/logs/sms.log (good for local testing).</p></div>
-          <div>
-            <label class="mb-1.5 block text-sm font-semibold text-stone-700">SMS provider</label>
-            <select name="sms_provider" class="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm">
-              <option value="log"'.($this->smsProvider()==='log'?' selected':'').'>Log only (dev)</option>
-              <option value="arkesel"'.($this->smsProvider()==='arkesel'?' selected':'').'>Arkesel</option>
-              <option value="moolre"'.($this->smsProvider()==='moolre'?' selected':'').'>Moolre</option>
-            </select>
+        <div class="sticky top-[4.6rem] z-20 -mx-1 overflow-x-auto px-1">
+          <div class="inline-flex min-w-full gap-2 rounded-full border border-stone-200 bg-white/95 p-1 backdrop-blur settings-tabs">
+            <button type="button" data-settings-tab="general" class="settings-tab-btn rounded-full bg-stone-950 px-4 py-2 text-sm font-bold text-white">General</button>
+            <button type="button" data-settings-tab="homepage" class="settings-tab-btn rounded-full px-4 py-2 text-sm font-bold text-stone-600">Homepage</button>
+            <button type="button" data-settings-tab="packages" class="settings-tab-btn rounded-full px-4 py-2 text-sm font-bold text-stone-600">Packages</button>
+            <button type="button" data-settings-tab="contract" class="settings-tab-btn rounded-full px-4 py-2 text-sm font-bold text-stone-600">Contract</button>
+            <button type="button" data-settings-tab="sms" class="settings-tab-btn rounded-full px-4 py-2 text-sm font-bold text-stone-600">SMS &amp; OTP</button>
           </div>
-          <div class="grid sm:grid-cols-2 gap-4">
-            '.$this->input('sms_sender','Sender ID','text',$this->cfg('sms_sender','iBuk'),'Approved sender ID').'
-            '.$this->input('sms_unit_cost','Unit cost (GHS per SMS)','number',$this->cfg('sms_unit_cost','0.04'),'e.g. 0.04').'
-          </div>
-          '.$this->input('sms_arkesel_api_key','Arkesel API key','text',$this->cfg('sms_arkesel_api_key',''),'From Arkesel dashboard').'
-          '.$this->input('sms_moolre_vas_key','Moolre VAS / API key','text',$this->cfg('sms_moolre_vas_key',''),'X-API-VASKEY from Moolre').'
-          '.$this->input('otp_sms_template','OTP message template','text',$this->cfg('otp_sms_template','Your {app} code is {otp}. It expires in 10 minutes.'),'Your {app} code is {otp}…').'
-          <p class="text-xs text-stone-500">Dashboard shows live SMS balance from the selected provider when a key is set, plus money spent from the SMS log.</p>
-        </section>
+        </div>
 
-        <button class="rounded-xl bg-slate-950 px-5 py-3 text-sm font-bold text-white">Save all settings</button>
-        </form>';
+        <div data-settings-panel="general" class="settings-panel space-y-5">
+          <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
+            <div><h2 class="font-black">Studio identity</h2><p class="mt-1 text-sm text-stone-500">Brand name shown in the header, portals and messages.</p></div>
+            <div class="grid sm:grid-cols-2 gap-4">'.$this->input('app_name','App / brand name','text',$this->cfg('app_name','iBuk.online'),'Studio brand name').$this->input('photographer_name','Photographer / studio name','text',$this->cfg('photographer_name',''),'Photographer name').'</div>
+          </section>
+
+          <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
+            <div><h2 class="font-black">Payments &amp; WhatsApp</h2><p class="mt-1 text-sm text-stone-500">Shown on MoMo instructions and the chat button. The WhatsApp number itself stays hidden on the public site.</p></div>
+            <div class="grid sm:grid-cols-2 gap-4">'.$this->input('momo_network','MoMo network','text',$this->cfg('momo_network','MTN'),'MTN').$this->input('momo_number','MoMo number','tel',$this->cfg('momo_number',''),'e.g. 0541069241').$this->input('momo_account_name','MoMo account name','text',$this->cfg('momo_account_name',''),'Account name on MoMo').$this->input('whatsapp_number','WhatsApp number','tel',$this->cfg('whatsapp_number','0541069241'),'e.g. 0541069241').'</div>
+          </section>
+        </div>
+
+        <div data-settings-panel="homepage" class="settings-panel hidden space-y-5">
+          <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
+            <div><h2 class="font-black">Homepage copy</h2><p class="mt-1 text-sm text-stone-500">Text on the main landing page. Slides are managed separately.</p></div>
+            '.$this->input('home_headline','Headline','text',$this->cfg('home_headline','Beauty, held still.'),'Main homepage headline').'
+            '.$this->input('home_title','Supporting title','text',$this->cfg('home_title','Weddings, portraits, and days worth keeping.'),'Short supporting line').'
+            '.$this->textarea('home_lead','Lead paragraph','Short paragraph under the title',$this->cfg('home_lead','Book a session in minutes. Pay with MoMo. Follow every step in one quiet place.'),3,'').'
+            '.$this->input('home_cta','Button label','text',$this->cfg('home_cta','Explore packages'),'Homepage button text').'
+            <p class="text-xs text-stone-500"><a class="font-bold text-stone-800" href="'.$this->url('/dashboard/slides').'">Manage homepage slides →</a></p>
+          </section>
+        </div>
+
+        <div data-settings-panel="packages" class="settings-panel hidden space-y-5">
+          <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
+            <div><h2 class="font-black">Package categories</h2><p class="mt-1 text-sm text-stone-500">Labels and blurbs used on the package pages.</p></div>
+            <div class="grid sm:grid-cols-3 gap-4">
+              '.$this->input('cat_wedding_label','Wedding label','text',$this->cfg('cat_wedding_label','Wedding & Engagement'),'Category title').'
+              '.$this->input('cat_wedding_short','Wedding short','text',$this->cfg('cat_wedding_short','Wedding'),'Short label').'
+              '.$this->textarea('cat_wedding_blurb','Wedding blurb','Short category description',$this->cfg('cat_wedding_blurb',''),2,'').'
+              '.$this->input('cat_baby_label','Baby label','text',$this->cfg('cat_baby_label','Baby Dedication & Christening'),'Category title').'
+              '.$this->input('cat_baby_short','Baby short','text',$this->cfg('cat_baby_short','Baby'),'Short label').'
+              '.$this->textarea('cat_baby_blurb','Baby blurb','Short category description',$this->cfg('cat_baby_blurb',''),2,'').'
+              '.$this->input('cat_studio_label','Studio label','text',$this->cfg('cat_studio_label','Studio Shoot'),'Category title').'
+              '.$this->input('cat_studio_short','Studio short','text',$this->cfg('cat_studio_short','Studio'),'Short label').'
+              '.$this->textarea('cat_studio_blurb','Studio blurb','Short category description',$this->cfg('cat_studio_blurb',''),2,'').'
+            </div>
+          </section>
+
+          <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
+            <div><h2 class="font-black">Wedding payment schedule</h2><p class="mt-1 text-sm text-stone-500">Used as guidance inside the contract for wedding and engagement bookings.</p></div>
+            <div class="grid sm:grid-cols-2 gap-4">'.$this->input('wedding_booking_percent','Booking payment %','number',$bookingPct,'e.g. 80').$this->input('wedding_balance_percent','Balance % (auto-filled hint)','number',$balancePct,'e.g. 20').'</div>
+            <p class="text-xs text-stone-500">Balance % is informational. The site uses the booking % and treats the rest as balance.</p>
+          </section>
+        </div>
+
+        <div data-settings-panel="contract" class="settings-panel hidden space-y-5">
+          <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
+            <div><h2 class="font-black">Contracts &amp; client terms</h2><p class="mt-1 text-sm text-stone-500">This agreement is shown in the client portal before a booking is fully accepted.</p></div>
+            '.$this->textarea('contract_text','Standard service agreement','Main contract used for photography, videography, weddings, engagements and other shoots',$this->cfg('contract_text',''),10,'').'
+            '.$this->textarea('cheat_sheet_text','Optional session notes','Optional extra prep notes for your own internal use or future expansion',$this->cfg('cheat_sheet_text',''),6,'').'
+            '.$this->textarea('studio_note','Client portal note','Note shown on the client dashboard',$this->cfg('studio_note',''),3,'').'
+          </section>
+        </div>
+
+        <div data-settings-panel="sms" class="settings-panel hidden space-y-5">
+          <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
+            <div><h2 class="font-black">SMS &amp; OTP</h2><p class="mt-1 text-sm text-stone-500">Choose the live provider, keep keys hidden, and only replace them when you type a new value.</p></div>
+            <div>
+              <label class="mb-1.5 block text-sm font-semibold text-stone-700">SMS provider</label>
+              <select name="sms_provider" class="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm">
+                <option value="log"'.($provider==='log'?' selected':'').'>Log only (dev)</option>
+                <option value="arkesel"'.($provider==='arkesel'?' selected':'').'>Arkesel</option>
+                <option value="moolre"'.($provider==='moolre'?' selected':'').'>Moolre</option>
+              </select>
+            </div>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <div class="rounded-2xl border border-stone-200 bg-stone-50 p-4"><p class="text-[11px] font-bold uppercase tracking-[0.16em] text-stone-400">Arkesel status</p><div class="mt-2">'.($arkConfigured ? '<span class="rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700">Configured</span>' : '<span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-600">Not set</span>').'</div></div>
+              <div class="rounded-2xl border border-stone-200 bg-stone-50 p-4"><p class="text-[11px] font-bold uppercase tracking-[0.16em] text-stone-400">Moolre status</p><div class="mt-2">'.($moolreConfigured ? '<span class="rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700">Configured</span>' : '<span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-600">Not set</span>').'</div></div>
+            </div>
+            <div class="grid sm:grid-cols-2 gap-4">
+              '.$this->input('sms_sender','Sender ID','text',$this->cfg('sms_sender','iBuk'),'Approved sender ID').'
+              '.$this->input('sms_unit_cost','Unit cost (GHS per SMS)','number',$this->cfg('sms_unit_cost','0.04'),'e.g. 0.04').'
+            </div>
+            '.$this->secretInput('sms_arkesel_api_key','Arkesel API key','From Arkesel dashboard', $arkConfigured, $provider === 'arkesel').'
+            '.$this->secretInput('sms_moolre_vas_key','Moolre VAS / API key','X-API-VASKEY from Moolre', $moolreConfigured, $provider === 'moolre').'
+            '.$this->input('otp_sms_template','OTP message template','text',$this->cfg('otp_sms_template','Your {app} code is {otp}. It expires in 10 minutes.'),'Your {app} code is {otp}…').'
+            <p class="text-xs text-stone-500">If a key is already configured, it stays saved when you leave the field blank. Enter a new value only when you want to replace it.</p>
+          </section>
+        </div>
+
+        <div class="sticky bottom-3 z-20 pt-2">
+          <div class="rounded-2xl border border-stone-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p class="text-sm text-stone-500">Save once to apply changes across the dashboard, booking pages, and OTP flow.</p>
+              <button class="rounded-xl bg-slate-950 px-5 py-3 text-sm font-bold text-white">Save all settings</button>
+            </div>
+          </div>
+        </div>
+        </form>
+        <script>
+        (() => {
+          const buttons = Array.from(document.querySelectorAll("[data-settings-tab]"));
+          const panels = Array.from(document.querySelectorAll("[data-settings-panel]"));
+          if (!buttons.length || !panels.length) return;
+          const activate = (name) => {
+            buttons.forEach((btn) => {
+              const active = btn.dataset.settingsTab === name;
+              btn.classList.toggle("bg-stone-950", active);
+              btn.classList.toggle("text-white", active);
+              btn.classList.toggle("text-stone-600", !active);
+            });
+            panels.forEach((panel) => {
+              panel.classList.toggle("hidden", panel.dataset.settingsPanel !== name);
+            });
+            try {
+              localStorage.setItem("ibuk-settings-tab", name);
+            } catch (e) {}
+          };
+          buttons.forEach((btn) => btn.addEventListener("click", () => activate(btn.dataset.settingsTab || "general")));
+          let current = "general";
+          try {
+            current = localStorage.getItem("ibuk-settings-tab") || "general";
+          } catch (e) {}
+          if (!panels.some((panel) => panel.dataset.settingsPanel === current)) current = "general";
+          activate(current);
+        })();
+        </script>';
         $this->render('Settings', $this->adminShell('Settings', $body), ['portal' => 'admin']);
     }
 
@@ -2483,6 +2566,9 @@ SQL;
             }
             if ($key === 'sms_unit_cost') {
                 $val = (string)max(0, (float)$val);
+            }
+            if (in_array($key, ['sms_arkesel_api_key', 'sms_moolre_vas_key'], true) && $val === '') {
+                $val = $this->cfg($key, '');
             }
             $stmt->execute([$key, $val]);
         }
@@ -3486,6 +3572,20 @@ body.portal-app{min-height:100svh;background:#f3f1ee}
         $ph=' placeholder="'.htmlspecialchars($placeholder).'"';
         $auto=$type==='password'?' autocomplete="current-password"':($type==='tel'?' autocomplete="tel"':'');
         return '<div><label class="text-sm font-bold">'.htmlspecialchars($label).'</label><input'.$step.' type="'.$type.'" name="'.$name.'" value="'.htmlspecialchars((string)$value).'"'.$ph.$auto.' class="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 placeholder:text-stone-400"></div>';
+    }
+
+    private function secretInput(string $name, string $label, string $placeholder, bool $configured, bool $activeProvider = false): string
+    {
+        $status = $configured
+            ? '<span class="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700">Configured</span>'
+            : '<span class="rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-stone-600">Not set</span>';
+        $active = $activeProvider
+            ? '<span class="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-sky-700">Active</span>'
+            : '';
+        $help = $configured
+            ? 'Current key is hidden. Leave blank to keep it, or enter a new value to replace it.'
+            : $placeholder;
+        return '<div><div class="flex flex-wrap items-center justify-between gap-2"><label class="text-sm font-bold">'.htmlspecialchars($label).'</label><div class="flex flex-wrap gap-2">'.$status.$active.'</div></div><input type="password" name="'.$name.'" value="" placeholder="'.htmlspecialchars($configured ? 'Leave blank to keep current key' : $placeholder).'" autocomplete="new-password" class="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 placeholder:text-stone-400"><p class="mt-1 text-xs text-stone-500">'.htmlspecialchars($help).'</p></div>';
     }
 
     private function textarea(string $name, string $label, string $placeholder = '', string $value = '', int $rows = 3, string $wrapClass = 'md:col-span-2'): string
