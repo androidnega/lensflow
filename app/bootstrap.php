@@ -189,13 +189,15 @@ CREATE TABLE IF NOT EXISTS packages (
 CREATE TABLE IF NOT EXISTS coupons (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
+    package_id INTEGER,
     type TEXT NOT NULL DEFAULT 'percent',
     value REAL NOT NULL,
     max_uses INTEGER NOT NULL DEFAULT 0,
     uses INTEGER NOT NULL DEFAULT 0,
     expires_at TEXT,
     active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(package_id) REFERENCES packages(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS bookings (
@@ -316,6 +318,7 @@ CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_codes(phone);
 SQL;
         $this->db->exec($schema);
         $this->ensureColumn('packages', 'category', "category TEXT NOT NULL DEFAULT 'wedding'");
+        $this->ensureColumn('coupons', 'package_id', 'package_id INTEGER');
         $this->ensureColumn('bookings', 'contract_text_snapshot', 'contract_text_snapshot TEXT');
         $this->ensureColumn('bookings', 'contract_signer_name', 'contract_signer_name TEXT');
         $this->ensureColumn('bookings', 'contract_signature', 'contract_signature TEXT');
@@ -1523,9 +1526,9 @@ SQL;
         $couponCode = strtoupper(trim($_POST['coupon_code'] ?? ''));
         $coupon = null;
         if ($couponCode) {
-            $coupon = $this->validCoupon($couponCode);
+            $coupon = $this->validCoupon($couponCode, $packageId);
             if (!$coupon) {
-                $this->flash('error','Coupon is invalid, expired or unavailable.');
+                $this->flash('error','Coupon is invalid, expired, unavailable, or not for this package.');
                 $cat = (string)($package['category'] ?? 'wedding');
                 $this->redirect('/packages/'.$cat.'?book='.$packageId.'#book');
             }
@@ -1550,6 +1553,12 @@ SQL;
         ]);
         $bookingId = (int)$this->db->lastInsertId();
         $this->seedTimeline($bookingId, (int)$package['turnaround_days'], $eventDate);
+        $bookingSms = "Hi {$this->user['first_name']}, your booking {$bookingCode} for {$package['name']} has been created.";
+        if ($coupon) {
+            $bookingSms .= " Coupon {$couponCode} was applied.";
+        }
+        $bookingSms .= " Log in to your portal for payment instructions.";
+        $this->sendSms((string)$this->user['phone'], $bookingSms);
         $success = 'Booking created. Use the payment reference shown below.';
         if ($coupon) {
             $success .= ' Coupon '.$couponCode.' was applied.';
@@ -1744,6 +1753,7 @@ SQL;
         }
         $stmt = $this->db->prepare("INSERT INTO payments (booking_id,amount,payment_type,network,sender_number,momo_reference,system_reference,status,submitted_at) VALUES (?,?,?,?,?,?,?,?,?)");
         $stmt->execute([$booking['id'],$amount,trim($_POST['payment_type'] ?? 'deposit'),'MTN',$sender,$momoRef,$systemRef,'pending',$this->now()]);
+        $this->sendSms((string)$this->user['phone'], "Hi {$this->user['first_name']}, we received your payment submission of ".$this->money($amount)." for {$booking['booking_code']}. We will review it and update you.");
         $this->flash('success','Payment submitted for verification. You will be notified after approval.');
         $this->redirect('/client/booking?id='.$booking['id']);
     }
@@ -1758,6 +1768,7 @@ SQL;
             $this->redirect('/client/booking?id='.$booking['id']);
         }
         $this->db->prepare("UPDATE bookings SET contract_accepted=1,contract_accepted_at=?,updated_at=? WHERE id=?")->execute([$this->now(),$this->now(),$booking['id']]);
+        $this->sendSms((string)$this->user['phone'], "Hi {$this->user['first_name']}, your service agreement for {$booking['booking_code']} has been accepted. We will keep you updated in your portal.");
         $msg = $this->needsFullContract($booking) ? 'Contract accepted. Your booking record has been updated.' : 'Cheat sheet acknowledged. You are ready for the session.';
         $this->flash('success',$msg);
         $this->redirect('/client/booking?id='.$booking['id']);
@@ -2089,8 +2100,12 @@ SQL;
     {
         $this->requireRole('admin');
         $id=(int)($_POST['booking_id']??0);
+        $title = trim($_POST['title']??'Milestone');
         $order=(int)$this->db->query("SELECT COALESCE(MAX(sort_order),0)+1 FROM timeline WHERE booking_id=".$id)->fetchColumn();
-        $this->db->prepare("INSERT INTO timeline (booking_id,title,description,status,due_date,sort_order,created_at) VALUES (?,?,?,?,?,?,?)")->execute([$id,trim($_POST['title']??'Milestone'),'','pending',trim($_POST['due_date']??''),$order,$this->now()]);
+        $this->db->prepare("INSERT INTO timeline (booking_id,title,description,status,due_date,sort_order,created_at) VALUES (?,?,?,?,?,?,?)")->execute([$id,$title,'','pending',trim($_POST['due_date']??''),$order,$this->now()]);
+        $stmt=$this->db->prepare("SELECT u.phone,u.first_name,b.booking_code FROM bookings b JOIN users u ON u.id=b.user_id WHERE b.id=?");
+        $stmt->execute([$id]);$c=$stmt->fetch();
+        if($c)$this->sendSms($c['phone'],"Hi {$c['first_name']}, there is a new update on your booking {$c['booking_code']}: {$title}. Check your portal for details.");
         $this->flash('success','Timeline step added.');
         $this->redirect('/dashboard/booking?id='.$id);
     }
@@ -2583,20 +2598,29 @@ SQL;
     private function adminCoupons(): void
     {
         $this->requireRole('admin');
+        $packages = $this->db->query("SELECT id,name,category FROM packages ORDER BY CASE category WHEN 'wedding' THEN 1 WHEN 'baby' THEN 2 WHEN 'studio' THEN 3 ELSE 4 END, price ASC, id ASC")->fetchAll();
+        $packageOptions = '<option value="0">All packages</option>';
+        foreach ($packages as $pkg) {
+            $packageOptions .= '<option value="'.(int)$pkg['id'].'">'.htmlspecialchars($pkg['name'].' · '.ucfirst((string)$pkg['category'])).'</option>';
+        }
         $rows='';
-        foreach($this->db->query("SELECT * FROM coupons ORDER BY id DESC")->fetchAll() as $c){
+        foreach($this->db->query("SELECT c.*,p.name package_name,p.category package_category FROM coupons c LEFT JOIN packages p ON p.id=c.package_id ORDER BY c.id DESC")->fetchAll() as $c){
             $value=$c['type']==='percent' ? rtrim(rtrim(number_format((float)$c['value'],2), '0'),'.').'%' : $this->money((float)$c['value']);
-            $rows.='<div class="rounded-3xl border border-slate-200 bg-white p-5"><div class="flex justify-between gap-3"><div><p class="font-black">'.$c['code'].'</p><p class="text-sm text-slate-500">'.$value.' off · '.$c['uses'].' uses'.($c['max_uses']?' / '.$c['max_uses']:'').'</p></div>'.$this->badge((int)$c['active']?'active':'inactive').'</div><form method="post" action="'.$this->url('/dashboard/coupon-toggle').'" class="mt-3">'.$this->csrfField().'<input type="hidden" name="id" value="'.$c['id'].'"><button class="text-xs font-bold text-slate-700">Toggle status</button></form></div>';
+            $scope = !empty($c['package_id']) && !empty($c['package_name'])
+                ? 'For '.htmlspecialchars($c['package_name']).' · '.htmlspecialchars(ucfirst((string)($c['package_category'] ?? 'package')))
+                : 'All packages';
+            $rows.='<div class="rounded-3xl border border-slate-200 bg-white p-5"><div class="flex flex-wrap justify-between gap-3"><div><p class="font-black">'.$c['code'].'</p><p class="mt-1 text-sm text-slate-500">'.$value.' off · '.$scope.'</p><p class="mt-1 text-xs text-slate-400">'.$c['uses'].' uses'.($c['max_uses']?' / '.$c['max_uses']:'').' · '.($c['expires_at'] ? 'Expires '.$c['expires_at'] : 'No expiry').'</p></div>'.$this->badge((int)$c['active']?'active':'inactive').'</div><form method="post" action="'.$this->url('/dashboard/coupon-toggle').'" class="mt-3">'.$this->csrfField().'<input type="hidden" name="id" value="'.$c['id'].'"><button class="text-xs font-bold text-slate-700">Toggle status</button></form></div>';
         }
         if(!$rows)$rows='<p class="text-sm text-slate-500">No coupons created.</p>';
-        $form='<form method="post" action="'.$this->url('/dashboard/coupon-save').'" class="grid sm:grid-cols-2 gap-4">'.$this->csrfField().
+        $form='<div class="rounded-3xl border border-stone-200 bg-stone-50 p-4"><p class="text-sm font-semibold text-stone-700">Create one code, choose a discount, then decide whether it works for all packages or only one package.</p></div><form method="post" action="'.$this->url('/dashboard/coupon-save').'" class="grid sm:grid-cols-2 gap-4">'.$this->csrfField().
             $this->input('code','Coupon code','text','','e.g. LOVE10').
             '<div><label class="text-sm font-bold">Discount type</label><select name="type" class="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3"><option value="percent">Percentage</option><option value="fixed">Fixed amount</option></select></div>'.
             $this->input('value','Discount value','number','','e.g. 10').
+            '<div><label class="text-sm font-bold">Apply to package</label><select name="package_id" class="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm">'.$packageOptions.'</select></div>'.
             $this->input('max_uses','Maximum uses (0 = unlimited)','number','0','0 for unlimited').
             $this->input('expires_at','Expiry date','date','','Optional end date').
             '<div class="sm:col-span-2"><button class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Create coupon</button></div></form>';
-        $this->render('Coupons',$this->adminShell('Coupons','<div class="grid xl:grid-cols-[.9fr_1.1fr] gap-5"><div class="space-y-3">'.$rows.'</div><div class="rounded-3xl border border-slate-200 bg-white p-5"><h2 class="font-black">New coupon</h2><div class="mt-4">'.$form.'</div></div></div>'),['portal'=>'admin']);
+        $this->render('Coupons',$this->adminShell('Coupons','<div class="grid xl:grid-cols-[.95fr_1.05fr] gap-5"><div class="space-y-3">'.$rows.'</div><div class="rounded-3xl border border-slate-200 bg-white p-5"><h2 class="font-black">New coupon</h2><p class="mt-1 text-sm text-slate-500">Keep coupons simple: code, discount, package scope, and optional expiry.</p><div class="mt-4">'.$form.'</div></div></div>'),['portal'=>'admin']);
     }
 
     private function saveCoupon(): void
@@ -2604,8 +2628,21 @@ SQL;
         $this->requireRole('admin');
         $code=strtoupper(trim($_POST['code']??''));
         if(!$code) throw new RuntimeException('Coupon code is required.');
+        $type = ($_POST['type']??'percent')==='fixed'?'fixed':'percent';
+        $value = max(0, (float)($_POST['value']??0));
+        $packageId = (int)($_POST['package_id'] ?? 0);
+        $packageScope = null;
+        if ($packageId > 0) {
+            $check = $this->db->prepare("SELECT id FROM packages WHERE id=? LIMIT 1");
+            $check->execute([$packageId]);
+            $packageScope = $check->fetchColumn() ? $packageId : null;
+        }
+        if ($value <= 0) {
+            $this->flash('error','Enter a discount value greater than zero.');
+            $this->redirect('/dashboard/coupons');
+        }
         try{
-            $this->db->prepare("INSERT INTO coupons (code,type,value,max_uses,uses,expires_at,active,created_at) VALUES (?,?,?,?,0,?,1,?)")->execute([$code,($_POST['type']??'percent')==='fixed'?'fixed':'percent',(float)($_POST['value']??0),(int)($_POST['max_uses']??0),trim($_POST['expires_at']??'')?:null,$this->now()]);
+            $this->db->prepare("INSERT INTO coupons (code,package_id,type,value,max_uses,uses,expires_at,active,created_at) VALUES (?,?,?,?,?,0,?,1,?)")->execute([$code,$packageScope,$type,$value,(int)($_POST['max_uses']??0),trim($_POST['expires_at']??'')?:null,$this->now()]);
         }catch(PDOException $e){$this->flash('error','Coupon code already exists.');$this->redirect('/dashboard/coupons');}
         $this->flash('success','Coupon created.');
         $this->redirect('/dashboard/coupons');
@@ -2887,10 +2924,12 @@ SQL;
         return '<a href="'.$this->url($href).'" class="block rounded-3xl border border-slate-200 bg-white p-5 hover:border-slate-300"><div class="flex items-start justify-between gap-4"><div class="min-w-0"><p class="font-black truncate">'.htmlspecialchars($b['package_name']).'</p>'.$name.'<p class="mt-1 text-xs text-slate-500">'.$b['booking_code'].' · '.htmlspecialchars($this->bookingEventSummary($b)).'</p></div><div class="text-right shrink-0">'.$this->badge($b['status']).'<p class="mt-2 text-sm font-black">'.$this->money((float)$b['total']).'</p></div></div></a>';
     }
 
-    private function validCoupon(string $code): ?array
+    private function validCoupon(string $code, int $packageId = 0): ?array
     {
         $stmt=$this->db->prepare("SELECT * FROM coupons WHERE code=? AND active=1 LIMIT 1");$stmt->execute([$code]);$c=$stmt->fetch();
         if(!$c)return null;
+        $scope = (int)($c['package_id'] ?? 0);
+        if ($scope > 0 && $scope !== $packageId) return null;
         if($c['expires_at'] && strtotime($c['expires_at'].' 23:59:59')<time())return null;
         if((int)$c['max_uses']>0 && (int)$c['uses']>=(int)$c['max_uses'])return null;
         return $c;
