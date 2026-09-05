@@ -1196,7 +1196,7 @@ SQL;
         }
         $hint = trim((string)($this->config['admin_login'] ?? 'admin'));
         $placeholder = $hint !== '' ? $hint : 'admin';
-        $body = $this->authLayout('Studio admin','Sign in with your admin phone and password.',
+        $body = $this->authLayout('Studio admin','Sign in with your admin username or phone and password.',
             '<form method="post" action="'.$this->url('/admin/login').'" class="space-y-4">'.$this->csrfField().
             $this->input('login','Admin username or phone','text','',$placeholder).
             $this->input('password','Password','password','','Enter admin password').
@@ -1209,20 +1209,30 @@ SQL;
         if ($this->user && ($this->user['role'] ?? '') === 'admin') {
             $this->redirect('/dashboard');
         }
-        $login = trim((string)($_POST['login'] ?? ''));
+        $login = trim((string)($_POST['login'] ?? ($_POST['phone'] ?? '')));
         $password = (string)($_POST['password'] ?? '');
         $configLogin = trim((string)($this->config['admin_login'] ?? 'admin'));
         $configPhone = $this->normalizePhone((string)($this->config['admin_phone'] ?? '0200000000'));
         $configPassword = (string)($this->config['admin_password'] ?? 'ChangeMe123!');
-        $matchConfig = ($configLogin !== '' && strcasecmp($login, $configLogin) === 0) || $this->normalizePhone($login) === $configPhone;
-        if (!$matchConfig || !hash_equals($configPassword, $password)) {
-            $this->flash('error','Admin login failed. Check phone and password.');
-            $this->redirect('/admin');
-        }
+        $submittedPhone = $this->normalizePhone($login);
+        $matchConfig = (($configLogin !== '' && strcasecmp($login, $configLogin) === 0) || ($submittedPhone !== '' && $submittedPhone === $configPhone))
+            && hash_equals($configPassword, $password);
+
         $this->syncAdminAccount();
         $stmt = $this->db->prepare("SELECT * FROM users WHERE role='admin' ORDER BY id ASC LIMIT 1");
         $stmt->execute();
         $user = $stmt->fetch();
+        $matchDb = false;
+        if ($user) {
+            $matchIdentity = ($submittedPhone !== '' && $submittedPhone === (string)$user['phone'])
+                || strcasecmp($login, (string)($user['first_name'] ?? '')) === 0
+                || strcasecmp($login, 'admin') === 0;
+            $matchDb = $matchIdentity && password_verify($password, (string)$user['password_hash']);
+        }
+        if (!$matchConfig && !$matchDb) {
+            $this->flash('error','Admin login failed. Check username/phone and password.');
+            $this->redirect('/admin');
+        }
         if (!$user) {
             $this->flash('error','Admin account is not ready yet.');
             $this->redirect('/admin');
