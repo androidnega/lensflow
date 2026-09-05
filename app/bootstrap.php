@@ -510,13 +510,30 @@ SQL;
 
         $admin = $this->db->query("SELECT * FROM users WHERE role='admin' ORDER BY id ASC LIMIT 1")->fetch();
         if (!$admin) {
+            $existingPhone = null;
+            if ($phone !== '') {
+                $check = $this->db->prepare("SELECT id FROM users WHERE phone=? LIMIT 1");
+                $check->execute([$phone]);
+                $existingPhone = $check->fetchColumn() ?: null;
+            }
+            if ($existingPhone) {
+                $phone = '0200000000';
+            }
             $stmt = $this->db->prepare("INSERT INTO users (role,first_name,last_name,phone,email,password_hash,created_at) VALUES ('admin',?,?,?,?,?,?)");
             $stmt->execute([$firstName, 'Admin', $phone, $email, password_hash($password, PASSWORD_DEFAULT), $this->now()]);
             return;
         }
 
+        $nextPhone = $phone;
+        if ($phone !== '') {
+            $check = $this->db->prepare("SELECT id FROM users WHERE phone=? AND id<>? LIMIT 1");
+            $check->execute([$phone, $admin['id']]);
+            if ($check->fetchColumn()) {
+                $nextPhone = (string)$admin['phone'];
+            }
+        }
         $this->db->prepare("UPDATE users SET first_name=?, last_name=?, phone=?, email=?, password_hash=? WHERE id=?")
-            ->execute([$firstName, 'Admin', $phone, $email, password_hash($password, PASSWORD_DEFAULT), $admin['id']]);
+            ->execute([$firstName, 'Admin', $nextPhone, $email, password_hash($password, PASSWORD_DEFAULT), $admin['id']]);
     }
 
     private function seedHomeSlides(): void
