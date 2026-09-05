@@ -320,6 +320,12 @@ SQL;
         $this->ensureColumn('bookings', 'contract_signature', 'contract_signature TEXT');
         $this->ensureColumn('bookings', 'contract_ip', 'contract_ip TEXT');
         $this->ensureColumn('bookings', 'contract_file', 'contract_file TEXT');
+        $this->ensureColumn('bookings', 'wedding_date', 'wedding_date TEXT');
+        $this->ensureColumn('bookings', 'engagement_date', 'engagement_date TEXT');
+        $this->ensureColumn('bookings', 'prior_payment_amount', 'prior_payment_amount REAL NOT NULL DEFAULT 0');
+        $this->ensureColumn('bookings', 'prior_payment_note', 'prior_payment_note TEXT');
+        $this->ensureColumn('bookings', 'addon_summary', 'addon_summary TEXT');
+        $this->ensureColumn('bookings', 'addon_total', 'addon_total REAL NOT NULL DEFAULT 0');
         $this->ensureColumn('packages', 'cover_image', 'cover_image TEXT');
         $this->seedPackageCovers();
     }
@@ -335,6 +341,7 @@ SQL;
     private function seedDefaults(): void
     {
         $this->seedCataloguePackages();
+        $this->syncWeddingPackages();
 
         $admin = $this->db->prepare("SELECT id FROM users WHERE role='admin' LIMIT 1");
         $admin->execute();
@@ -454,6 +461,51 @@ SQL;
         $stmt = $this->db->prepare("INSERT INTO timeline_templates (title,description,due_rule,due_offset,sort_order,active,created_at) VALUES (?,?,?,?,?,1,?)");
         foreach ($steps as $s) {
             $stmt->execute([$s[0],$s[1],$s[2],$s[3],$s[4],$now]);
+        }
+    }
+
+    private function syncWeddingPackages(): void
+    {
+        $updates = [
+            'probasic' => [
+                'name' => 'ProBasic',
+                'description' => 'Engagement-only photo coverage with framed prints and soft-copy delivery.',
+                'price' => 3659.99,
+                'turnaround_days' => 14,
+                'deliverables' => "1 A3 frame\n8 Retouched pictures\n8GB Pen drive for soft copy pictures\nOver 165 soft copy pictures\nEngagement only\nNo Video",
+            ],
+            'ultra' => [
+                'name' => 'Ultra',
+                'description' => 'Wedding-day coverage with video, framed prints and Google Drive delivery.',
+                'price' => 4499.0,
+                'turnaround_days' => 21,
+                'deliverables' => "2 A3 frames\n12 Retouched Pictures\nPictures on Google Drive\n8GB Pen drive for softcopy pictures\nOver 200 soft copy pictures\nWedding Video only",
+            ],
+            'premium' => [
+                'name' => 'Premium',
+                'description' => 'Wedding and engagement coverage with photobook, pre-wedding shoot and drone.',
+                'price' => 6600.0,
+                'turnaround_days' => 28,
+                'deliverables' => "A4 Photobook\nOver 300 soft copy pictures\nWedding & Engagement Video\n32GB Pen drive for the soft copy pictures / Videos\nPre Wedding Pictures / Video\nDrone",
+            ],
+            'gold' => [
+                'name' => 'Gold',
+                'description' => 'Top-tier wedding and engagement coverage with photobook, pre-wedding and drone.',
+                'price' => 7000.0,
+                'turnaround_days' => 30,
+                'deliverables' => "2 A3 frames\nPhotobook\nOver 370 soft copy pictures\nWedding & Engagement Video\n64GB Pen drive for the soft copy pictures and Videos\nPre Wedding Video\nPre Wedding Pictures\nDrone",
+            ],
+        ];
+        $stmt = $this->db->prepare("UPDATE packages SET name=?, description=?, price=?, turnaround_days=?, deliverables=?, active=1 WHERE slug=?");
+        foreach ($updates as $slug => $item) {
+            $stmt->execute([
+                $item['name'],
+                $item['description'],
+                $item['price'],
+                $item['turnaround_days'],
+                $item['deliverables'],
+                $slug,
+            ]);
         }
     }
 
@@ -582,14 +634,9 @@ SQL;
         $lead = htmlspecialchars($this->cfg('home_lead', 'Book a session in minutes. Pay with MoMo. Follow every step in one quiet place.'));
         $cta = htmlspecialchars($this->cfg('home_cta', 'Explore packages'));
 
-        $waDigits = preg_replace('/\D+/', '', $this->cfg('whatsapp_number', ''));
-        $waHref = '';
-        if ($waDigits !== '') {
-            if (str_starts_with($waDigits, '0') && strlen($waDigits) === 10) {
-                $waDigits = '233'.substr($waDigits, 1);
-            }
-            $waHref = 'https://wa.me/'.$waDigits;
-        }
+        $bookNowHref = $this->user && ($this->user['role'] ?? '') === 'client'
+            ? $this->url('/packages')
+            : $this->url('/register');
 
         if ($slides === [] && $lookbook !== []) {
             foreach ($lookbook as $item) {
@@ -620,9 +667,7 @@ SQL;
             $mosaicSide .= '<figure class="home-mosaic-side"><img src="'.htmlspecialchars($side['src']).'" alt="'.htmlspecialchars($side['alt']).'" width="820" height="1024" loading="lazy" decoding="async"></figure>';
         }
 
-        $waBtn = $waHref !== ''
-            ? '<a class="home-cta-ghost" href="'.htmlspecialchars($waHref).'" target="_blank" rel="noopener">WhatsApp</a>'
-            : '';
+        $waBtn = '<a class="home-cta home-cta-accent" href="'.$bookNowHref.'">Book noww</a>';
 
         $body = '
         <div class="home-page-inner">
@@ -682,6 +727,7 @@ SQL;
             $bookHref = $this->url('/register?package='.$p['id']);
         }
         $img = htmlspecialchars($this->packageCoverUrl($p));
+        $tags = $this->packageTagList($p);
         $body = '<div class="max-w-5xl mx-auto px-4 py-10 sm:py-14">
           <a class="inline-flex items-center gap-2 text-sm font-semibold text-stone-500 hover:text-stone-800" href="'.$this->url('/packages/'.$cat).'"><i class="fa-solid fa-arrow-left"></i> Back to '.htmlspecialchars($meta[$cat]['short'] ?? $label).'</a>
           <div class="mt-6 grid lg:grid-cols-[1.05fr_.95fr] gap-6 lg:gap-10 items-start">
@@ -690,6 +736,7 @@ SQL;
               <p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">'.htmlspecialchars($label).'</p>
               <h1 class="mt-2 font-display text-4xl sm:text-5xl font-semibold tracking-wide text-stone-950">'.htmlspecialchars($p['name']).'</h1>
               <p class="mt-4 text-3xl font-black text-stone-950">'.$this->money((float)$p['price']).'</p>
+              <ul class="offer-chips mt-4">'.$tags.'</ul>
               <p class="mt-4 text-stone-600 leading-7">'.nl2br(htmlspecialchars((string)$p['description'])).'</p>
               <div class="mt-6 rounded-2xl bg-stone-100/80 px-4 py-3 text-sm text-stone-600"><i class="fa-regular fa-clock mr-2"></i>Estimated turnaround <strong>'.(int)$p['turnaround_days'].' days</strong></div>
               '.($list ? '<h2 class="mt-8 text-sm font-bold uppercase tracking-[0.14em] text-stone-500">What\'s included</h2><ul class="offer-detail-list mt-4">'.$list.'</ul>' : '').'
@@ -799,6 +846,20 @@ SQL;
         if ($this->profileNeedsName()) {
             $contactFields = $this->input('contact_name','Your full name','text','','e.g. Ama Mensah').$this->input('contact_email','Email (optional)','email','','name@email.com');
         }
+        $category = (string)($package['category'] ?? 'wedding');
+        $addOns = $this->bookingAddonCatalog($category);
+        $addOnHtml = '';
+        if ($addOns !== []) {
+            $addOnRows = '';
+            foreach ($addOns as $key => $item) {
+                $addOnRows .= '<label class="flex items-start gap-3 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3"><input type="checkbox" name="addons[]" value="'.htmlspecialchars($key).'" class="mt-1 h-4 w-4 rounded border-stone-300 text-stone-900"><span class="min-w-0"><span class="block text-sm font-bold text-stone-900">'.htmlspecialchars($item['label']).'</span><span class="mt-0.5 block text-xs text-stone-500">'.htmlspecialchars($item['hint']).'</span></span><span class="ml-auto whitespace-nowrap text-sm font-black text-stone-900">'.$this->money((float)$item['price']).'</span></label>';
+            }
+            $addOnHtml = '<div class="md:col-span-2"><label class="text-sm font-bold">Add-ons (optional)</label><div class="mt-2 grid gap-3">'.$addOnRows.'</div></div>';
+        }
+        $combinedDates = '';
+        if ($category === 'wedding') {
+            $combinedDates = '<div id="combined-dates-panel" class="md:col-span-2 hidden rounded-2xl border border-stone-200 bg-stone-50 p-4"><p class="text-sm font-bold text-stone-900">Wedding &amp; engagement dates</p><p class="mt-1 text-xs leading-5 text-stone-500">Choose both dates when this booking includes the engagement shoot and the wedding day.</p><div class="mt-3 grid md:grid-cols-2 gap-4">'.$this->input('engagement_date','Engagement date','date','','Select engagement date').$this->input('wedding_date','Wedding date','date','','Select wedding date').'</div></div>';
+        }
         return '<div id="book" class="mb-10 scroll-mt-28 rounded-[2rem] border border-stone-200 bg-white p-5 sm:p-8 shadow-sm">
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div class="flex items-start gap-4">
@@ -816,15 +877,42 @@ SQL;
             <input type="hidden" name="package_id" value="'.(int)$package['id'].'">
             '.$contactFields.'
             '.$this->eventTypeSelect((string)($package['category'] ?? 'wedding')).'
-            '.$this->input('event_date','Event date','date','','Select date').'
+            <div id="single-date-field">'.$this->input('event_date','Event date','date','','Select date').'</div>
+            '.$combinedDates.'
             '.$this->input('event_location','Event location','text','','Venue or location').'
+            '.$this->input('prior_payment_amount','Already paid / part-paid amount (optional)','number','','0.00').'
             '.$this->input('coupon_code','Coupon code (optional)','text','','Enter coupon if any').'
+            '.$this->textarea('prior_payment_note','Prior payment note (optional)','Tell us when you paid, the reference used, or anything we should verify first.','',3,'md:col-span-2').'
+            '.$addOnHtml.'
             '.$this->textarea('notes','Notes','Venue, preferred time, extra requests…').'
             <div class="md:col-span-2 flex flex-wrap items-center gap-3 pt-1">
               <button class="rounded-full bg-stone-950 px-6 py-3 text-sm font-bold text-white hover:bg-stone-800 transition">Confirm booking</button>
               <p class="text-xs text-stone-500">You will get payment instructions after confirmation.</p>
             </div>
           </form>
+          <script>
+          (() => {
+            const form = document.currentScript?.previousElementSibling;
+            if (!form) return;
+            const select = form.querySelector("select[name=\"event_type\"]");
+            const single = form.querySelector("#single-date-field");
+            const combo = form.querySelector("#combined-dates-panel");
+            const singleInput = form.querySelector("input[name=\"event_date\"]");
+            const engagementInput = form.querySelector("input[name=\"engagement_date\"]");
+            const weddingInput = form.querySelector("input[name=\"wedding_date\"]");
+            if (!select || !single || !combo || !singleInput || !engagementInput || !weddingInput) return;
+            const sync = () => {
+              const combined = select.value === "Wedding & Engagement";
+              combo.classList.toggle("hidden", !combined);
+              single.classList.toggle("hidden", combined);
+              singleInput.required = !combined;
+              engagementInput.required = combined;
+              weddingInput.required = combined;
+            };
+            select.addEventListener("change", sync);
+            sync();
+          })();
+          </script>
         </div>';
     }
 
@@ -866,14 +954,7 @@ SQL;
         $detail = $this->url('/package/'.rawurlencode((string)$p['slug']));
         $desc = trim((string)($p['description'] ?? ''));
         if (mb_strlen($desc) > 88) $desc = rtrim(mb_substr($desc, 0, 85)).'…';
-        $lines = array_values(array_filter(array_map('trim', preg_split('/\r?\n/', (string)$p['deliverables']))));
-        $preview = array_slice($lines, 0, 2);
-        $extra = max(0, count($lines) - count($preview));
-        $chips = '';
-        foreach ($preview as $line) {
-            $chips .= '<li>'.htmlspecialchars($line).'</li>';
-        }
-        if ($extra > 0) $chips .= '<li class="more">+'.$extra.' more</li>';
+        $chips = $this->packageTagList($p);
         $img = htmlspecialchars($this->packageCoverUrl($p));
         $book = '';
         if ($showBook) {
@@ -896,13 +977,117 @@ SQL;
               <p class="offer-price">'.$this->money((float)$p['price']).'</p>
             </div>
             <p class="offer-desc">'.htmlspecialchars($desc).'</p>
-            '.($chips ? '<ul class="offer-chips">'.$chips.'</ul>' : '').'
+            <ul class="offer-chips">'.$chips.'</ul>
             <div class="offer-actions">
               <a class="offer-more" href="'.$detail.'">Read more <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
               '.$book.'
             </div>
           </div>
         </article>';
+    }
+
+    private function packageTagList(array $p): string
+    {
+        $tags = [];
+        $days = (int)($p['turnaround_days'] ?? 0);
+        if ($days > 0) $tags[] = $days.' days';
+
+        $blob = strtolower(trim((string)($p['deliverables'] ?? '').' '.(string)($p['description'] ?? '')));
+        if (str_contains($blob, 'engagement only')) {
+            $tags[] = 'Engagement only';
+        } elseif (str_contains($blob, 'wedding & engagement')) {
+            $tags[] = 'Wedding & engagement';
+        } elseif (str_contains($blob, 'wedding')) {
+            $tags[] = 'Wedding coverage';
+        }
+
+        if (str_contains($blob, 'no video')) {
+            $tags[] = 'Photos only';
+        } elseif (str_contains($blob, 'video')) {
+            $tags[] = 'Video included';
+        } else {
+            $tags[] = 'Photos only';
+        }
+
+        $lines = array_values(array_filter(array_map('trim', preg_split('/\r?\n/', (string)($p['deliverables'] ?? '')))));
+        foreach (array_slice($lines, 0, 2) as $line) {
+            $tags[] = $line;
+        }
+
+        $html = '';
+        foreach (array_slice(array_values(array_unique($tags)), 0, 5) as $tag) {
+            $html .= '<li>'.htmlspecialchars($tag).'</li>';
+        }
+        return $html;
+    }
+
+    private function bookingAddonCatalog(string $category): array
+    {
+        return match ($category) {
+            'wedding' => [
+                'extra-retouch' => ['label' => 'Extra retouched pictures', 'price' => 350, 'hint' => 'Add more polished hero images to the delivery.'],
+                'traditional' => ['label' => 'Traditional ceremony coverage', 'price' => 900, 'hint' => 'Extra coverage for the traditional event day.'],
+                'prewedding' => ['label' => 'Pre-wedding shoot', 'price' => 1200, 'hint' => 'A styled pre-wedding portrait session.'],
+                'drone' => ['label' => 'Drone coverage', 'price' => 1500, 'hint' => 'Aerial clips and scene coverage where venue rules allow it.'],
+                'express' => ['label' => 'Express delivery', 'price' => 650, 'hint' => 'Faster gallery turnaround and priority edit queue.'],
+            ],
+            default => [],
+        };
+    }
+
+    private function selectedBookingAddons(array $selected, string $category): array
+    {
+        $catalog = $this->bookingAddonCatalog($category);
+        $items = [];
+        $total = 0.0;
+        foreach ($selected as $key) {
+            $key = (string)$key;
+            if (!isset($catalog[$key])) continue;
+            $items[] = $catalog[$key]['label'].' ('.$this->money((float)$catalog[$key]['price']).')';
+            $total += (float)$catalog[$key]['price'];
+        }
+        return [
+            'summary' => implode(', ', $items),
+            'total' => round($total, 2),
+        ];
+    }
+
+    private function bookingEventSummary(array $booking): string
+    {
+        $eventType = (string)($booking['event_type'] ?? '');
+        $eventDate = trim((string)($booking['event_date'] ?? ''));
+        $weddingDate = trim((string)($booking['wedding_date'] ?? ''));
+        $engagementDate = trim((string)($booking['engagement_date'] ?? ''));
+
+        if ($eventType === 'Wedding & Engagement' && ($weddingDate !== '' || $engagementDate !== '')) {
+            $bits = [];
+            if ($engagementDate !== '') $bits[] = 'Engagement: '.$engagementDate;
+            if ($weddingDate !== '') $bits[] = 'Wedding: '.$weddingDate;
+            return implode(' · ', $bits);
+        }
+        return $eventDate !== '' ? $eventDate : 'Date to be confirmed';
+    }
+
+    private function bookingSummaryTags(array $booking): string
+    {
+        $tags = [];
+        if ((float)($booking['discount'] ?? 0) > 0 && trim((string)($booking['coupon_code'] ?? '')) !== '') {
+            $tags[] = 'Coupon '.trim((string)$booking['coupon_code']).' applied';
+        }
+        if ((float)($booking['addon_total'] ?? 0) > 0) {
+            $tags[] = 'Add-ons included';
+        }
+        if ((float)($booking['prior_payment_amount'] ?? 0) > 0) {
+            $tags[] = 'Prior payment noted';
+        }
+        if (trim((string)($booking['event_type'] ?? '')) === 'Wedding & Engagement') {
+            $tags[] = 'Two dates scheduled';
+        }
+        $html = '';
+        foreach ($tags as $tag) {
+            $html .= '<span class="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700">'.htmlspecialchars($tag).'</span>';
+        }
+        return $html;
     }
 
     private function categoryIcon(string $category, string $class = 'h-5 w-5'): string
@@ -1145,6 +1330,21 @@ SQL;
             $cat = (string)($package['category'] ?? 'wedding');
             $this->redirect('/packages/'.$cat.'?book='.$packageId.'#book');
         }
+        $eventDate = trim((string)($_POST['event_date'] ?? ''));
+        $engagementDate = trim((string)($_POST['engagement_date'] ?? ''));
+        $weddingDate = trim((string)($_POST['wedding_date'] ?? ''));
+        if ($eventType === 'Wedding & Engagement') {
+            if ($engagementDate === '' || $weddingDate === '') {
+                $this->flash('error','Choose both the engagement date and wedding date for this package.');
+                $cat = (string)($package['category'] ?? 'wedding');
+                $this->redirect('/packages/'.$cat.'?book='.$packageId.'#book');
+            }
+            $eventDate = $weddingDate;
+        } elseif ($eventDate === '') {
+            $this->flash('error','Please choose the event date.');
+            $cat = (string)($package['category'] ?? 'wedding');
+            $this->redirect('/packages/'.$cat.'?book='.$packageId.'#book');
+        }
 
         if ($this->profileNeedsName()) {
             $full = trim(preg_replace('/\s+/', ' ', (string)($_POST['contact_name'] ?? '')) ?? '');
@@ -1161,13 +1361,18 @@ SQL;
         }
 
         $subtotal = (float)$package['price'];
+        $selectedAddOns = $this->selectedBookingAddons($_POST['addons'] ?? [], (string)($package['category'] ?? 'wedding'));
+        $addonTotal = $selectedAddOns['total'];
+        $subtotal += $addonTotal;
         $discount = 0.0;
         $couponCode = strtoupper(trim($_POST['coupon_code'] ?? ''));
+        $coupon = null;
         if ($couponCode) {
             $coupon = $this->validCoupon($couponCode);
             if (!$coupon) {
                 $this->flash('error','Coupon is invalid, expired or unavailable.');
-                $this->redirect('/packages');
+                $cat = (string)($package['category'] ?? 'wedding');
+                $this->redirect('/packages/'.$cat.'?book='.$packageId.'#book');
             }
             $discount = $coupon['type']==='fixed' ? min($subtotal,(float)$coupon['value']) : $subtotal*((float)$coupon['value']/100);
             $this->db->prepare("UPDATE coupons SET uses=uses+1 WHERE id=?")->execute([$coupon['id']]);
@@ -1176,18 +1381,25 @@ SQL;
         $isWedding = ($package['category'] ?? '') === 'wedding';
         $bookingPct = $this->weddingBookingPercent();
         $deposit = $isWedding ? round($total * ($bookingPct / 100), 2) : 0.0;
+        $priorPaymentAmount = max(0, round((float)($_POST['prior_payment_amount'] ?? 0), 2));
+        $priorPaymentNote = trim((string)($_POST['prior_payment_note'] ?? ''));
         $bookingCode = 'BK-'.date('ymd').'-'.strtoupper(substr(bin2hex(random_bytes(4)),0,6));
         $now = $this->now();
 
-        $stmt = $this->db->prepare("INSERT INTO bookings (booking_code,user_id,package_id,event_type,event_date,event_location,notes,subtotal,discount,total,deposit_required,coupon_code,payment_status,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        $stmt = $this->db->prepare("INSERT INTO bookings (booking_code,user_id,package_id,event_type,event_date,event_location,notes,subtotal,discount,total,deposit_required,coupon_code,payment_status,status,created_at,updated_at,wedding_date,engagement_date,prior_payment_amount,prior_payment_note,addon_summary,addon_total) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
         $stmt->execute([
             $bookingCode,$this->user['id'],$packageId,
-            $eventType,trim($_POST['event_date'] ?? ''),trim($_POST['event_location'] ?? ''),trim($_POST['notes'] ?? ''),
-            $subtotal,$discount,$total,$deposit,$couponCode?:null,'unpaid','awaiting_payment',$now,$now
+            $eventType,$eventDate,trim($_POST['event_location'] ?? ''),trim($_POST['notes'] ?? ''),
+            $subtotal,$discount,$total,$deposit,$couponCode?:null,'unpaid','awaiting_payment',$now,$now,
+            $weddingDate ?: null,$engagementDate ?: null,$priorPaymentAmount,$priorPaymentNote ?: null,$selectedAddOns['summary'] ?: null,$addonTotal
         ]);
         $bookingId = (int)$this->db->lastInsertId();
-        $this->seedTimeline($bookingId, (int)$package['turnaround_days'], trim($_POST['event_date'] ?? ''));
-        $this->flash('success','Booking created. Use the payment reference shown below.');
+        $this->seedTimeline($bookingId, (int)$package['turnaround_days'], $eventDate);
+        $success = 'Booking created. Use the payment reference shown below.';
+        if ($coupon) {
+            $success .= ' Coupon '.$couponCode.' was applied.';
+        }
+        $this->flash('success',$success);
         $this->redirect('/client/booking?id='.$bookingId);
     }
 
@@ -1251,6 +1463,20 @@ SQL;
         if ($booking['payment_status'] === 'unpaid' || $booking['payment_status'] === 'partial' || $balance > 0.01) {
             $paymentBlock = $this->paymentInstructions($booking, $balance, $paid <= 0 ? 'deposit' : 'balance');
         }
+        $bookingTags = $this->bookingSummaryTags($booking);
+        $addonNote = trim((string)($booking['addon_summary'] ?? ''));
+        $priorAmount = (float)($booking['prior_payment_amount'] ?? 0);
+        $priorNote = trim((string)($booking['prior_payment_note'] ?? ''));
+        $extras = '';
+        if ($bookingTags !== '') {
+            $extras .= '<div class="mt-4 flex flex-wrap gap-2">'.$bookingTags.'</div>';
+        }
+        if ($addonNote !== '' || (float)($booking['addon_total'] ?? 0) > 0) {
+            $extras .= '<div class="rounded-3xl border border-stone-200 bg-white p-5"><h3 class="font-black text-stone-950">Add-ons</h3><p class="mt-2 text-sm text-stone-600">'.htmlspecialchars($addonNote ?: 'No add-ons selected.').'</p><p class="mt-3 text-xs font-bold uppercase tracking-wider text-stone-400">Addon total</p><p class="mt-1 text-lg font-black text-stone-950">'.$this->money((float)($booking['addon_total'] ?? 0)).'</p></div>';
+        }
+        if ($priorAmount > 0 || $priorNote !== '') {
+            $extras .= '<div class="rounded-3xl border border-sky-200 bg-sky-50 p-5"><h3 class="font-black text-sky-950">Client prior-payment note</h3><p class="mt-2 text-sm text-sky-900/80">Already paid: <strong>'.$this->money($priorAmount).'</strong></p>'.($priorNote !== '' ? '<p class="mt-2 text-sm leading-6 text-sky-900/80">'.nl2br(htmlspecialchars($priorNote)).'</p>' : '').'</div>';
+        }
 
         $terms = '';
         if ($booking['payment_status'] !== 'unpaid') {
@@ -1269,7 +1495,7 @@ SQL;
             'category' => (string)($booking['package_category'] ?? 'wedding'),
         ]));
         $body = $this->clientShell('Booking '.$booking['booking_code'],
-            '<div class="grid lg:grid-cols-[1.3fr_.7fr] gap-5"><div class="space-y-5"><div class="rounded-3xl border border-slate-200 bg-white overflow-hidden"><div class="offer-detail-media"><img src="'.$cover.'" alt="'.htmlspecialchars($booking['package_name']).'" width="1200" height="800" decoding="async"></div><div class="p-5"><div class="flex flex-wrap items-start justify-between gap-4"><div><p class="text-xs font-bold uppercase tracking-wider text-slate-400">'.$booking['booking_code'].'</p><h2 class="mt-1 text-xl font-black">'.htmlspecialchars($booking['package_name']).'</h2><p class="mt-2 text-sm text-slate-600">'.htmlspecialchars($booking['event_type'] ?: 'Photography booking').' · '.htmlspecialchars($booking['event_date'] ?: 'Date to be confirmed').'</p></div>'.$this->badge($booking['status']).'</div><div class="mt-5 grid grid-cols-3 gap-3">'.$this->mini('Total',$this->money((float)$booking['total'])).$this->mini('Paid',$this->money($paid)).$this->mini('Balance',$this->money($balance)).'</div></div></div>'.$paymentBlock.$terms.'</div><aside><div class="rounded-3xl border border-slate-200 bg-white p-5 sticky top-24"><h3 class="font-black">Journey to your images</h3><p class="mt-1 text-xs text-stone-500">Follow each step until soft copies unlock.</p><div class="mt-5">'.$timeline.'</div></div></aside></div>'
+            '<div class="grid lg:grid-cols-[1.3fr_.7fr] gap-5"><div class="space-y-5"><div class="rounded-3xl border border-slate-200 bg-white overflow-hidden"><div class="offer-detail-media"><img src="'.$cover.'" alt="'.htmlspecialchars($booking['package_name']).'" width="1200" height="800" decoding="async"></div><div class="p-5"><div class="flex flex-wrap items-start justify-between gap-4"><div><p class="text-xs font-bold uppercase tracking-wider text-slate-400">'.$booking['booking_code'].'</p><h2 class="mt-1 text-xl font-black">'.htmlspecialchars($booking['package_name']).'</h2><p class="mt-2 text-sm text-slate-600">'.htmlspecialchars($booking['event_type'] ?: 'Photography booking').' · '.htmlspecialchars($this->bookingEventSummary($booking)).'</p></div>'.$this->badge($booking['status']).'</div><div class="mt-5 grid grid-cols-3 gap-3">'.$this->mini('Total',$this->money((float)$booking['total'])).$this->mini('Paid',$this->money($paid)).$this->mini('Balance',$this->money($balance)).'</div>'.$extras.'</div></div>'.$paymentBlock.$terms.'</div><aside><div class="rounded-3xl border border-slate-200 bg-white p-5 sticky top-24"><h3 class="font-black">Journey to your images</h3><p class="mt-1 text-xs text-stone-500">Follow each step until soft copies unlock.</p><div class="mt-5">'.$timeline.'</div></div></aside></div>'
         );
         $this->render('Booking',$body,['portal'=>'client']);
     }
@@ -2334,7 +2560,7 @@ SQL;
     {
         $name=$admin && isset($b['first_name']) ? '<p class="text-xs text-slate-500">'.htmlspecialchars($b['first_name'].' '.$b['last_name']).'</p>' : '';
         $href=$admin?'/dashboard/booking?id='.$b['id']:'/client/booking?id='.$b['id'];
-        return '<a href="'.$this->url($href).'" class="block rounded-3xl border border-slate-200 bg-white p-5 hover:border-slate-300"><div class="flex items-start justify-between gap-4"><div class="min-w-0"><p class="font-black truncate">'.htmlspecialchars($b['package_name']).'</p>'.$name.'<p class="mt-1 text-xs text-slate-500">'.$b['booking_code'].' · '.htmlspecialchars($b['event_date'] ?: 'Date to be confirmed').'</p></div><div class="text-right shrink-0">'.$this->badge($b['status']).'<p class="mt-2 text-sm font-black">'.$this->money((float)$b['total']).'</p></div></div></a>';
+        return '<a href="'.$this->url($href).'" class="block rounded-3xl border border-slate-200 bg-white p-5 hover:border-slate-300"><div class="flex items-start justify-between gap-4"><div class="min-w-0"><p class="font-black truncate">'.htmlspecialchars($b['package_name']).'</p>'.$name.'<p class="mt-1 text-xs text-slate-500">'.$b['booking_code'].' · '.htmlspecialchars($this->bookingEventSummary($b)).'</p></div><div class="text-right shrink-0">'.$this->badge($b['status']).'<p class="mt-2 text-sm font-black">'.$this->money((float)$b['total']).'</p></div></div></a>';
     }
 
     private function validCoupon(string $code): ?array
@@ -2665,6 +2891,8 @@ body:has(#site-menu:checked) main{pointer-events:none}
 .home-cta:active{transform:scale(.98)}
 .home-cta-ghost{display:inline-flex;align-items:center;justify-content:center;min-height:2.75rem;padding:0 1.15rem;border-radius:999px;border:1px solid rgba(28,25,23,.14);color:#44403c;font-size:.84rem;font-weight:650;text-decoration:none;background:transparent}
 .home-cta-ghost:hover{border-color:#14110f;color:#14110f}
+.home-cta-accent{background:#16a34a!important;color:#fff!important}
+.home-cta-accent:hover{background:#15803d!important}
 .home-hero-stage{min-height:0}
 .home-mosaic{display:block}
 .home-mosaic-main{position:relative;overflow:hidden;border-radius:1.35rem;height:min(58svh,28rem);background:#1c1917;box-shadow:0 18px 40px rgba(28,25,23,.1)}
