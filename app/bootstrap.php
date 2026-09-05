@@ -3324,6 +3324,11 @@ TEXT;
 
     private function cfg(string $key, string $default = ''): string
     {
+        $configSmsDriver = strtolower(trim((string)($this->config['sms']['driver'] ?? '')));
+        $configArkeselKey = trim((string)((($this->config['sms']['arkesel_api_key'] ?? null) ?: ($this->config['sms']['api_key'] ?? ''))));
+        $configMoolreKey = trim((string)($this->config['sms']['moolre_vas_key'] ?? ''));
+        $configSmsOverride = ($configSmsDriver === 'arkesel' && $configArkeselKey !== '')
+            || ($configSmsDriver === 'moolre' && $configMoolreKey !== '');
         $map = [
             'app_name' => $this->config['app_name'] ?? null,
             'photographer_name' => $this->config['photographer_name'] ?? null,
@@ -3336,7 +3341,7 @@ TEXT;
             'sms_arkesel_api_key' => ($this->config['sms']['arkesel_api_key'] ?? null) ?: ($this->config['sms']['api_key'] ?? null),
             'sms_moolre_vas_key' => $this->config['sms']['moolre_vas_key'] ?? null,
         ];
-        if (in_array($key, ['sms_sender', 'sms_provider', 'sms_arkesel_api_key', 'sms_moolre_vas_key'], true)
+        if ($configSmsOverride && in_array($key, ['sms_sender', 'sms_provider', 'sms_arkesel_api_key', 'sms_moolre_vas_key'], true)
             && array_key_exists($key, $map) && $map[$key] !== null && $map[$key] !== '') {
             return (string)$map[$key];
         }
