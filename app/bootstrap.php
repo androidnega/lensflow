@@ -373,9 +373,9 @@ SQL;
             'cat_studio_blurb' => 'Professional studio portrait sessions.',
             'wedding_booking_percent' => '80',
             'wedding_balance_percent' => '20',
-            'contract_text' => "PHOTOGRAPHY SERVICE AGREEMENT (Wedding & Engagement)\n\nThis agreement is between the Studio and the Client named in this booking.\n\n1. Booking confirmation\nThe Client confirms the selected package, event details and pricing shown in the portal.\n\n2. Payments\nWedding & engagement bookings follow the payment schedule shown in the portal. Partial payments are allowed. Work is scheduled after the booking payment is verified. Final deliverables remain subject to clearing the remaining balance unless otherwise agreed in writing.\n\n3. Schedule & delivery\nEstimated turnaround follows the package terms and the project timeline in the portal. Dates may shift by mutual agreement.\n\n4. Usage & ownership\nThe Studio retains copyright in the images. The Client receives personal-use soft copies as listed in the package. Commercial use requires prior written consent.\n\n5. Cancellation\nVerified booking payments are non-refundable, except where the Studio cancels the booking.\n\n6. Acceptance\nBy accepting this agreement in the portal, the Client agrees to these terms.",
+            'contract_text' => "PHOTO / VIDEO SERVICE AGREEMENT\n\nThis agreement is between the Studio and the Client named in this booking.\n\n1. Scope of coverage\nThe Studio will provide the photography services, videography services, or combined coverage selected in the booked package, subject to the event details confirmed in the portal.\n\n2. Booking confirmation\nA booking is treated as confirmed once the Client submits the booking, accepts this agreement, and the Studio verifies the required payment or agreed first installment.\n\n3. Payments and balance\nPackage pricing, discounts, add-ons, and any prior-payment notes shown in the portal form part of this agreement. Partial payments may be accepted, but any outstanding balance must be cleared before final edited images, videos, albums, frames, or other deliverables are released, unless the Studio agrees otherwise in writing.\n\n4. Rescheduling and delays\nThe Client should notify the Studio as early as possible about date, venue, or schedule changes. The Studio will make reasonable efforts to accommodate changes, but availability for a new date is not guaranteed.\n\n5. Creative coverage and editing\nThe Client hires the Studio for its professional judgment, shooting style, and editing approach. The Studio will make reasonable efforts to capture key moments, but exact poses, people, or scenes cannot be guaranteed in every live event situation.\n\n6. Delivery timeline\nEstimated turnaround depends on the package selected, the scope of coverage, and production workload. The portal timeline and package turnaround guide the expected delivery window, but the Studio may reasonably extend delivery where necessary for editing quality, technical recovery, or circumstances beyond its control.\n\n7. Copyright and usage\nCopyright in all photographs, videos, raw files, and edited deliverables remains with the Studio unless otherwise agreed in writing. The Client receives personal-use rights for delivered files. Commercial, resale, or third-party promotional use requires the Studio's prior written consent.\n\n8. Client cooperation\nThe Client is responsible for providing accurate event details, securing venue permissions where required, keeping to agreed timelines, and ensuring a safe working environment for the Studio team and equipment.\n\n9. Cancellation and non-refund policy\nPayments already verified by the Studio are non-refundable once the date has been reserved and work has been scheduled, except where the Studio cancels and cannot provide the agreed service or an acceptable alternative.\n\n10. Limitation of liability\nIf equipment failure, illness, accident, force majeure, restricted venue access, or other events beyond the Studio's reasonable control prevent full performance, the Studio's liability is limited to amounts paid for the affected service portion, unless another remedy is agreed in writing.\n\n11. Acceptance\nBy accepting this agreement in the portal, the Client confirms that the booking summary, package details, payment terms, and portal record are correct and agrees to be bound by this service agreement.",
             'cheat_sheet_text' => "SESSION CHEAT SHEET\n\n• Confirm your booking details and preferred time with the studio.\n• Pay via MTN MoMo using your booking reference — you can pay in parts.\n• Arrive on time with outfits/props ready for the shoot.\n• Soft copies and package items are released after payment is cleared.\n• Message the studio on WhatsApp if anything changes.",
-            'studio_note' => "After payment verification, your booking becomes active. Complete the contract or cheat sheet in the portal, then follow every stage on your timeline.",
+            'studio_note' => "After payment verification, your booking becomes active. Complete the service agreement in the portal, then follow every stage on your timeline.",
             'studio_signer_name' => 'iBuk.online Studio',
             'otp_sms_template' => 'Your {app} code is {otp}. It expires in 10 minutes.',
         ];
@@ -389,11 +389,22 @@ SQL;
                 'Book a session in minutes. Pay with MoMo. Follow every step in one quiet place.',
             ],
             'home_cta' => ['View packages', 'Explore packages'],
+            'studio_note' => [
+                'After payment verification, your booking becomes active. Complete the contract or cheat sheet in the portal, then follow every stage on your timeline.',
+                'After payment verification, your booking becomes active. Complete the service agreement in the portal, then follow every stage on your timeline.',
+            ],
         ];
         $refreshStmt = $this->db->prepare("INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
         foreach ($copyRefresh as $key => [$old, $new]) {
             if ($this->setting($key) === $old) $refreshStmt->execute([$key, $new]);
         }
+        $legacyContract = "PHOTOGRAPHY SERVICE AGREEMENT (Wedding & Engagement)\n\nThis agreement is between the Studio and the Client named in this booking.\n\n1. Booking confirmation\nThe Client confirms the selected package, event details and pricing shown in the portal.\n\n2. Payments\nWedding & engagement bookings follow the payment schedule shown in the portal. Partial payments are allowed. Work is scheduled after the booking payment is verified. Final deliverables remain subject to clearing the remaining balance unless otherwise agreed in writing.\n\n3. Schedule & delivery\nEstimated turnaround follows the package terms and the project timeline in the portal. Dates may shift by mutual agreement.\n\n4. Usage & ownership\nThe Studio retains copyright in the images. The Client receives personal-use soft copies as listed in the package. Commercial use requires prior written consent.\n\n5. Cancellation\nVerified booking payments are non-refundable, except where the Studio cancels the booking.\n\n6. Acceptance\nBy accepting this agreement in the portal, the Client agrees to these terms.";
+        $currentContract = $this->setting('contract_text');
+        if ($currentContract === '' || $currentContract === $legacyContract) {
+            $refreshStmt->execute(['contract_text', $defaults['contract_text']]);
+        }
+        $this->db->prepare("UPDATE timeline_templates SET description=? WHERE title='2 · Confirm terms' AND (description='Wedding/engagement: sign contract. Other shoots: acknowledge cheat sheet.' OR description='Accept the contract or cheat sheet, then get ready for the shoot.')")
+            ->execute(['Review and accept the service agreement, then get ready for the shoot.']);
         // Rename legacy brands to iBuk.online once
         $legacy = ['Mhannuellens', 'LensFlow', 'Mhannuellens Studio'];
         $app = $this->setting('app_name');
@@ -444,7 +455,7 @@ SQL;
         $now = $this->now();
         $steps = [
             ['1 · Book & pay','Client picks a package, books, then pays via MoMo (partial OK).','booking',0,1],
-            ['2 · Confirm terms','Wedding/engagement: sign contract. Other shoots: acknowledge cheat sheet.','booking',1,2],
+            ['2 · Confirm terms','Review and accept the service agreement, then get ready for the shoot.','booking',1,2],
             ['3 · Shoot day','Studio covers the event or session on the booked date.','event',0,3],
             ['4 · Edit & polish','Photos are selected, edited and retouched to package specs.','turnaround',-3,4],
             ['5 · Images ready','Soft copies appear in the client portal for download.','turnaround',0,5],
@@ -1552,7 +1563,7 @@ SQL;
         $base = $eventDate && strtotime($eventDate) ? strtotime($eventDate) : time();
         $steps = [
             ['1 · Book & pay','Waiting for your MoMo payment to be verified.','pending',date('Y-m-d')],
-            ['2 · Confirm terms','Accept the contract or cheat sheet, then get ready for the shoot.','pending',date('Y-m-d', strtotime('+1 day'))],
+            ['2 · Confirm terms','Review and accept the service agreement, then get ready for the shoot.','pending',date('Y-m-d', strtotime('+1 day'))],
             ['3 · Shoot day','Photography session or event coverage.','pending',$eventDate ?: null],
             ['4 · Edit & polish','Your photos are selected, edited and retouched.','pending',date('Y-m-d', $base + max(1,$turnaroundDays-3)*86400)],
             ['5 · Images ready','Soft copies unlock in your portal for download.','pending',date('Y-m-d', $base + $turnaroundDays*86400)],
@@ -2224,7 +2235,7 @@ SQL;
           <p class="lead">Every booking follows this path in the client portal — from first payment to images in Downloads.</p>
           <div class="tunnel">
             <div class="tunnel-step"><span class="tunnel-num"><i class="fa-solid fa-credit-card"></i></span><strong>Book &amp; pay</strong><span>Pick package → MoMo pay → admin verifies.</span></div>
-            <div class="tunnel-step"><span class="tunnel-num"><i class="fa-solid fa-file-signature"></i></span><strong>Confirm terms</strong><span>Contract (wedding) or cheat sheet (other).</span></div>
+            <div class="tunnel-step"><span class="tunnel-num"><i class="fa-solid fa-file-signature"></i></span><strong>Confirm terms</strong><span>Review and accept the service agreement.</span></div>
             <div class="tunnel-step"><span class="tunnel-num"><i class="fa-solid fa-camera"></i></span><strong>Shoot day</strong><span>Coverage on the booked date.</span></div>
             <div class="tunnel-step"><span class="tunnel-num"><i class="fa-solid fa-wand-magic-sparkles"></i></span><strong>Edit &amp; polish</strong><span>Select, edit, retouch to package.</span></div>
             <div class="tunnel-step"><span class="tunnel-num"><i class="fa-solid fa-images"></i></span><strong>Images ready</strong><span>Soft copies unlock in the portal.</span></div>
@@ -2407,15 +2418,15 @@ SQL;
         </section>
 
         <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
-          <div><h2 class="font-black">Wedding payment schedule</h2><p class="mt-1 text-sm text-stone-500">Shown only on the wedding/engagement contract. Clients can still pay in parts.</p></div>
+          <div><h2 class="font-black">Wedding payment schedule</h2><p class="mt-1 text-sm text-stone-500">Shown as guidance inside the standard service agreement for wedding and engagement bookings. Clients can still pay in parts.</p></div>
           <div class="grid sm:grid-cols-2 gap-4">'.$this->input('wedding_booking_percent','Booking payment %','number',$bookingPct,'e.g. 80').$this->input('wedding_balance_percent','Balance % (auto-filled hint)','number',$balancePct,'e.g. 20').'</div>
           <p class="text-xs text-stone-500">Balance % is informational — the site uses booking % and treats the rest as balance.</p>
         </section>
 
         <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
-          <div><h2 class="font-black">Contracts &amp; cheat sheet</h2></div>
-          '.$this->textarea('contract_text','Wedding & engagement contract','Full contract text for wedding bookings',$this->cfg('contract_text',''),8,'').'
-          '.$this->textarea('cheat_sheet_text','Session cheat sheet (baby, studio & other shoots)','Simple guide for non-wedding shoots',$this->cfg('cheat_sheet_text',''),6,'').'
+          <div><h2 class="font-black">Contracts &amp; client terms</h2></div>
+          '.$this->textarea('contract_text','Standard service agreement','Main contract used for photography, videography, weddings, engagements and other shoots',$this->cfg('contract_text',''),10,'').'
+          '.$this->textarea('cheat_sheet_text','Optional session notes','Optional extra prep notes for your own internal use or future expansion',$this->cfg('cheat_sheet_text',''),6,'').'
           '.$this->textarea('studio_note','Client portal note','Note shown on the client dashboard',$this->cfg('studio_note',''),3,'').'
         </section>
 
@@ -2680,10 +2691,8 @@ SQL;
 
     private function needsFullContract(array $booking): bool
     {
-        $cat = (string)($booking['package_category'] ?? $booking['category'] ?? '');
-        if ($cat === 'wedding') return true;
-        $event = strtolower((string)($booking['event_type'] ?? ''));
-        return str_contains($event, 'wedding') || str_contains($event, 'engagement');
+        unset($booking);
+        return true;
     }
 
     private function contractFormHtml(array $booking): string
@@ -2691,19 +2700,30 @@ SQL;
         $total = (float)$booking['total'];
         $bookingPct = $this->weddingBookingPercent();
         $balancePct = max(0, 100 - $bookingPct);
-        $nowPay = round($total * ($bookingPct / 100), 2);
-        $later = max(0, round($total - $nowPay, 2));
+        $paid = $this->bookingPaid((int)$booking['id']);
+        $balance = max(0, round($total - $paid, 2));
+        $category = (string)($booking['package_category'] ?? $booking['category'] ?? '');
+        $eventType = trim((string)($booking['event_type'] ?? '')) ?: 'Photo / video service';
+        $coverage = $this->packageCoverageLabel($booking);
         $contractText = $this->setting('contract_text');
+        if ($contractText === '') {
+            $contractText = "PHOTO / VIDEO SERVICE AGREEMENT\n\nThis agreement is between the Studio and the Client named in this booking.\n\n1. Scope of coverage\nThe Studio will provide the photography services, videography services, or combined coverage selected in the booked package, subject to the event details confirmed in the portal.\n\n2. Booking confirmation\nA booking is treated as confirmed once the Client submits the booking, accepts this agreement, and the Studio verifies the required payment or agreed first installment.\n\n3. Payments and balance\nPackage pricing, discounts, add-ons, and any prior-payment notes shown in the portal form part of this agreement. Partial payments may be accepted, but any outstanding balance must be cleared before final edited images, videos, albums, frames, or other deliverables are released, unless the Studio agrees otherwise in writing.\n\n4. Rescheduling and delays\nThe Client should notify the Studio as early as possible about date, venue, or schedule changes. The Studio will make reasonable efforts to accommodate changes, but availability for a new date is not guaranteed.\n\n5. Creative coverage and editing\nThe Client hires the Studio for its professional judgment, shooting style, and editing approach. The Studio will make reasonable efforts to capture key moments, but exact poses, people, or scenes cannot be guaranteed in every live event situation.\n\n6. Delivery timeline\nEstimated turnaround depends on the package selected, the scope of coverage, and production workload. The portal timeline and package turnaround guide the expected delivery window, but the Studio may reasonably extend delivery where necessary for editing quality, technical recovery, or circumstances beyond its control.\n\n7. Copyright and usage\nCopyright in all photographs, videos, raw files, and edited deliverables remains with the Studio unless otherwise agreed in writing. The Client receives personal-use rights for delivered files. Commercial, resale, or third-party promotional use requires the Studio's prior written consent.\n\n8. Client cooperation\nThe Client is responsible for providing accurate event details, securing venue permissions where required, keeping to agreed timelines, and ensuring a safe working environment for the Studio team and equipment.\n\n9. Cancellation and non-refund policy\nPayments already verified by the Studio are non-refundable once the date has been reserved and work has been scheduled, except where the Studio cancels and cannot provide the agreed service or an acceptable alternative.\n\n10. Limitation of liability\nIf equipment failure, illness, accident, force majeure, restricted venue access, or other events beyond the Studio's reasonable control prevent full performance, the Studio's liability is limited to amounts paid for the affected service portion, unless another remedy is agreed in writing.\n\n11. Acceptance\nBy accepting this agreement in the portal, the Client confirms that the booking summary, package details, payment terms, and portal record are correct and agrees to be bound by this service agreement.";
+        }
         return '<div class="rounded-3xl border border-slate-200 bg-white p-5">
-          <h3 class="font-black">Wedding &amp; engagement contract</h3>
-          <div class="mt-4 grid sm:grid-cols-2 gap-3">
-            <div class="rounded-2xl bg-stone-50 p-4"><p class="text-[10px] font-bold uppercase tracking-wider text-stone-400">To secure the date</p><p class="mt-1 text-lg font-black">'.$this->money($nowPay).'</p><p class="mt-1 text-xs text-stone-500">'.(int)$bookingPct.'% of package</p></div>
-            <div class="rounded-2xl bg-stone-50 p-4"><p class="text-[10px] font-bold uppercase tracking-wider text-stone-400">Before final delivery</p><p class="mt-1 text-lg font-black">'.$this->money($later).'</p><p class="mt-1 text-xs text-stone-500">'.(int)$balancePct.'% of package</p></div>
+          <h3 class="font-black">Service agreement</h3>
+          <p class="mt-1 text-sm text-stone-500">Standard contract for photography, videography, weddings, engagements, portraits, baby events, and other booked sessions.</p>
+          <div class="mt-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="rounded-2xl bg-stone-50 p-4"><p class="text-[10px] font-bold uppercase tracking-wider text-stone-400">Service type</p><p class="mt-1 text-sm font-black text-stone-950">'.htmlspecialchars($eventType).'</p></div>
+            <div class="rounded-2xl bg-stone-50 p-4"><p class="text-[10px] font-bold uppercase tracking-wider text-stone-400">Coverage</p><p class="mt-1 text-sm font-black text-stone-950">'.htmlspecialchars($coverage).'</p></div>
+            <div class="rounded-2xl bg-stone-50 p-4"><p class="text-[10px] font-bold uppercase tracking-wider text-stone-400">Package total</p><p class="mt-1 text-lg font-black">'.$this->money($total).'</p></div>
+            <div class="rounded-2xl bg-stone-50 p-4"><p class="text-[10px] font-bold uppercase tracking-wider text-stone-400">Balance remaining</p><p class="mt-1 text-lg font-black">'.$this->money($balance).'</p></div>
           </div>
-          <p class="mt-3 text-xs text-stone-500">You can pay in parts. Clear the booking payment to lock your date; clear the balance before delivery.</p>
+          <p class="mt-3 text-xs text-stone-500">'.($category === 'wedding'
+            ? 'Wedding and engagement bookings may follow a '.$bookingPct.'% booking payment and '.$balancePct.'% balance structure. Partial payments are still allowed, but the remaining balance must be cleared before final delivery.'
+            : 'Partial payments are allowed, but any remaining balance must be cleared before final delivery unless the Studio agrees otherwise in writing.').'</p>
           <div class="mt-4 max-h-48 overflow-auto rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">'.nl2br(htmlspecialchars($contractText)).'</div>
           <form method="post" action="'.$this->url('/client/contract-accept').'" class="mt-4">'.$this->csrfField().'<input type="hidden" name="booking_id" value="'.$booking['id'].'">
-            <label class="flex items-start gap-3 text-sm"><input required type="checkbox" class="mt-1" name="agree" value="1"><span>I have read and accept this wedding &amp; engagement contract, including the payment schedule above.</span></label>
+            <label class="flex items-start gap-3 text-sm"><input required type="checkbox" class="mt-1" name="agree" value="1"><span>I have read and accept this service agreement, including the booking, payment, delivery, and usage terms shown above.</span></label>
             <button class="mt-4 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Accept contract</button>
           </form>
         </div>';
