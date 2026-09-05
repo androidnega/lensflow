@@ -45,6 +45,7 @@ final class App
                 '/logout' => 'logout',
                 '/auth/otp' => 'otpForm',
                 '/client/dashboard' => 'clientDashboard',
+                '/client/new-booking' => 'clientNewBooking',
                 '/client/bookings' => 'clientBookings',
                 '/client/booking' => 'clientBookingDetail',
                 '/client/payments' => 'clientPayments',
@@ -839,7 +840,7 @@ SQL;
         return $this->bookingForm($package);
     }
 
-    private function bookingForm(array $package): string
+    private function bookingForm(array $package, array $options = []): string
     {
         $icon = $this->categoryIcon((string)($package['category'] ?? 'wedding'), 'h-6 w-6');
         $contactFields = '';
@@ -847,6 +848,19 @@ SQL;
             $contactFields = $this->input('contact_name','Your full name','text','','e.g. Ama Mensah').$this->input('contact_email','Email (optional)','email','','name@email.com');
         }
         $category = (string)($package['category'] ?? 'wedding');
+        $isPortalFlow = !empty($options['portal']);
+        $fixedEventType = trim((string)($options['fixed_event_type'] ?? ''));
+        $cancelHref = (string)($options['cancel_href'] ?? ('/packages/'.$category));
+        $eventField = $this->eventTypeSelect($category);
+        if ($fixedEventType !== '') {
+            $eventField = '<input type="hidden" name="event_type" value="'.htmlspecialchars($fixedEventType).'"><div class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3"><p class="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Booking type</p><p class="mt-1 text-sm font-black text-emerald-950">'.htmlspecialchars($fixedEventType).'</p></div>';
+        } elseif ($isPortalFlow && $category === 'wedding') {
+            $eventField = '<div class="md:col-span-2"><label class="text-sm font-bold">What are you booking?</label><div class="mt-2 grid gap-3 sm:grid-cols-3">
+              <label class="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800"><input type="radio" name="event_type" value="Wedding" class="mr-2" checked>Wedding</label>
+              <label class="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800"><input type="radio" name="event_type" value="Engagement" class="mr-2">Engagement</label>
+              <label class="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800"><input type="radio" name="event_type" value="Wedding &amp; Engagement" class="mr-2">Wedding &amp; engagement</label>
+            </div></div>';
+        }
         $addOns = $this->bookingAddonCatalog($category);
         $addOnHtml = '';
         if ($addOns !== []) {
@@ -865,18 +879,18 @@ SQL;
             <div class="flex items-start gap-4">
               <span class="grid h-12 w-12 place-items-center rounded-2xl bg-stone-950 text-amber-400">'.$icon.'</span>
               <div>
-                <p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">Confirm booking</p>
+                <p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">'.($isPortalFlow ? 'Book from your portal' : 'Confirm booking').'</p>
                 <h2 class="mt-1 text-2xl font-black text-stone-950">'.htmlspecialchars($package['name']).'</h2>
                 <p class="mt-1 text-sm text-stone-500">'.$this->money((float)$package['price']).'</p>
               </div>
             </div>
-            <a href="'.$this->url('/packages/'.htmlspecialchars((string)($package['category'] ?? 'wedding'))).'" class="text-sm font-semibold text-stone-500 hover:text-stone-800">Cancel</a>
+            <a href="'.$this->url($cancelHref).'" class="text-sm font-semibold text-stone-500 hover:text-stone-800">Cancel</a>
           </div>
           <form method="post" action="'.$this->url('/book').'" class="mt-6 grid md:grid-cols-2 gap-4">
             '.$this->csrfField().'
             <input type="hidden" name="package_id" value="'.(int)$package['id'].'">
             '.$contactFields.'
-            '.$this->eventTypeSelect((string)($package['category'] ?? 'wedding')).'
+            '.$eventField.'
             <div id="single-date-field">'.$this->input('event_date','Event date','date','','Select date').'</div>
             '.$combinedDates.'
             '.$this->input('event_location','Event location','text','','Venue or location').'
@@ -894,22 +908,27 @@ SQL;
           (() => {
             const form = document.currentScript?.previousElementSibling;
             if (!form) return;
-            const select = form.querySelector("select[name=\"event_type\"]");
             const single = form.querySelector("#single-date-field");
             const combo = form.querySelector("#combined-dates-panel");
             const singleInput = form.querySelector("input[name=\"event_date\"]");
             const engagementInput = form.querySelector("input[name=\"engagement_date\"]");
             const weddingInput = form.querySelector("input[name=\"wedding_date\"]");
-            if (!select || !single || !combo || !singleInput || !engagementInput || !weddingInput) return;
+            if (!single || !combo || !singleInput || !engagementInput || !weddingInput) return;
+            const readType = () => {
+              const select = form.querySelector("select[name=\"event_type\"]");
+              if (select) return select.value;
+              const checked = form.querySelector("input[name=\"event_type\"]:checked");
+              return checked ? checked.value : "";
+            };
             const sync = () => {
-              const combined = select.value === "Wedding & Engagement";
+              const combined = readType() === "Wedding & Engagement";
               combo.classList.toggle("hidden", !combined);
               single.classList.toggle("hidden", combined);
               singleInput.required = !combined;
               engagementInput.required = combined;
               weddingInput.required = combined;
             };
-            select.addEventListener("change", sync);
+            form.querySelectorAll("[name=\"event_type\"]").forEach((el) => el.addEventListener("change", sync));
             sync();
           })();
           </script>
@@ -1434,9 +1453,69 @@ SQL;
         $body = $this->clientShell('Overview',
             '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3">'.$this->stat('Bookings',(string)$active).$this->stat('Paid',$this->money($paid)).$this->stat('Files',(string)$this->clientFileCount()).$this->stat('Account','Active').'</div>'.
             $noteBlock.
-            '<div class="mt-7 flex items-center justify-between"><h2 class="text-lg font-black">Recent bookings</h2><a href="'.$this->url('/packages').'" class="rounded-xl bg-slate-950 px-3 py-2 text-xs font-bold text-white">New booking</a></div><div class="mt-3 space-y-3">'.$latest.'</div>'
+            '<div class="mt-7 flex items-center justify-between"><h2 class="text-lg font-black">Recent bookings</h2><a href="'.$this->url('/client/new-booking').'" class="rounded-xl bg-slate-950 px-3 py-2 text-xs font-bold text-white">New booking</a></div><div class="mt-3 space-y-3">'.$latest.'</div>'
         );
         $this->render('Client dashboard',$body,['portal'=>'client']);
+    }
+
+    private function clientNewBooking(): void
+    {
+        $this->requireRole('client');
+        $kinds = [
+            'wedding' => ['label' => 'Wedding / engagement', 'category' => 'wedding', 'event_type' => '', 'hint' => 'Choose a wedding package, then pick wedding, engagement, or both.'],
+            'birthday' => ['label' => 'Birthday', 'category' => 'studio', 'event_type' => 'Birthday', 'hint' => 'Fast birthday booking inside your portal.'],
+            'studio' => ['label' => 'Studio shoot', 'category' => 'studio', 'event_type' => 'Studio Portrait', 'hint' => 'Simple studio portrait booking.'],
+            'baby' => ['label' => 'Baby christening', 'category' => 'baby', 'event_type' => 'Baby Christening', 'hint' => 'Baby christening packages only.'],
+        ];
+        $kind = (string)($_GET['kind'] ?? '');
+        $bookId = (int)($_GET['book'] ?? 0);
+        if ($kind !== '' && !isset($kinds[$kind])) {
+            $kind = '';
+        }
+
+        $picker = '';
+        foreach ($kinds as $slug => $item) {
+            $active = $slug === $kind
+                ? ' border-stone-950 bg-stone-950 text-white'
+                : ' border-stone-200 bg-white text-stone-900';
+            $picker .= '<a href="'.$this->url('/client/new-booking?kind='.$slug).'" class="block rounded-3xl border px-4 py-4'.$active.'"><p class="text-sm font-black">'.htmlspecialchars($item['label']).'</p><p class="mt-1 text-xs leading-5 '.($slug === $kind ? 'text-stone-200' : 'text-stone-500').'">'.htmlspecialchars($item['hint']).'</p></a>';
+        }
+
+        if ($kind === '') {
+            $body = '<div class="space-y-5"><div class="rounded-3xl border border-stone-200 bg-white p-5"><p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">New booking</p><h2 class="mt-2 text-2xl font-black text-stone-950">What are you booking?</h2><p class="mt-2 text-sm leading-6 text-stone-500">Start here inside your portal. Pick the shoot type first and continue without using the public website flow.</p></div><div class="grid gap-3 sm:grid-cols-2">'.$picker.'</div></div>';
+            $this->render('New booking', $this->clientShell('New booking', $body), ['portal' => 'client']);
+            return;
+        }
+
+        $selected = $kinds[$kind];
+        $stmt = $this->db->prepare("SELECT * FROM packages WHERE category=? AND active=1 ORDER BY price ASC, id ASC");
+        $stmt->execute([$selected['category']]);
+        $packages = $stmt->fetchAll();
+
+        $cards = '';
+        foreach ($packages as $package) {
+            $cards .= '<div class="rounded-3xl border border-stone-200 bg-white p-4"><div class="flex items-start gap-4"><img src="'.htmlspecialchars($this->packageCoverUrl($package)).'" alt="" class="h-20 w-20 rounded-2xl object-cover shrink-0"><div class="min-w-0 flex-1"><p class="text-lg font-black text-stone-950">'.htmlspecialchars((string)$package['name']).'</p><p class="mt-1 text-sm text-stone-500">'.htmlspecialchars((string)$package['description']).'</p><div class="mt-3 flex flex-wrap gap-2"><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.$this->money((float)$package['price']).'</span><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.(int)$package['turnaround_days'].' days</span></div><a href="'.$this->url('/client/new-booking?kind='.$kind.'&book='.(int)$package['id'].'#book').'" class="mt-4 inline-flex rounded-full bg-stone-950 px-4 py-2 text-sm font-bold text-white">Continue</a></div></div></div>';
+        }
+        if ($cards === '') {
+            $cards = $this->emptyState('No packages yet', 'No active packages are available for this booking type right now.');
+        }
+
+        $form = '';
+        if ($bookId > 0) {
+            $pick = $this->db->prepare("SELECT * FROM packages WHERE id=? AND active=1 AND category=? LIMIT 1");
+            $pick->execute([$bookId, $selected['category']]);
+            $package = $pick->fetch();
+            if ($package) {
+                $form = '<div class="mt-5">'.$this->bookingForm($package, [
+                    'portal' => true,
+                    'fixed_event_type' => $selected['event_type'],
+                    'cancel_href' => '/client/new-booking?kind='.$kind,
+                ]).'</div>';
+            }
+        }
+
+        $body = '<div class="space-y-5"><div class="rounded-3xl border border-stone-200 bg-white p-5"><p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">Portal booking</p><h2 class="mt-2 text-2xl font-black text-stone-950">'.htmlspecialchars($selected['label']).'</h2><p class="mt-2 text-sm leading-6 text-stone-500">Choose a package below, then complete the booking right here in your client portal.</p></div><div class="grid gap-3 sm:grid-cols-2">'.$picker.'</div><div class="space-y-3">'.$cards.'</div>'.$form.'</div>';
+        $this->render('New booking', $this->clientShell('New booking', $body), ['portal' => 'client']);
     }
 
     private function clientBookings(): void
@@ -3120,7 +3199,7 @@ body.portal-app{min-height:100svh;background:#f3f1ee}
               <span><span class="portal-brand-name">'.$name.'</span><span class="portal-brand-sub">Client portal</span></span>
             </a>
             <div class="portal-top-actions">
-              <a class="portal-chip" href="'.$this->url('/packages').'">Book</a>
+              <a class="portal-chip" href="'.$this->url('/client/new-booking').'">Book</a>
               <a class="portal-chip" href="'.$this->url('/logout').'">Log out</a>
             </div>
           </header>
