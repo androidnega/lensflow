@@ -2627,15 +2627,19 @@ SQL;
             '<div><label class="text-sm font-bold">Apply to package</label><select name="package_id" class="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm">'.$packageOptions.'</select></div>'.
             $this->input('max_uses','Maximum uses (0 = unlimited)','number','0','0 for unlimited').
             $this->input('expires_at','Expiry date','date','','Optional end date').
-            '<div class="sm:col-span-2"><button class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Create coupon</button></div></form>';
+            '<div class="sm:col-span-2"><button type="submit" class="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Create coupon</button></div></form>';
         $this->render('Coupons',$this->adminShell('Coupons','<div class="grid xl:grid-cols-[.95fr_1.05fr] gap-5"><div class="space-y-3">'.$rows.'</div><div class="rounded-3xl border border-slate-200 bg-white p-5"><h2 class="font-black">New coupon</h2><p class="mt-1 text-sm text-slate-500">Keep coupons simple: code, discount, package scope, and optional expiry.</p><div class="mt-4">'.$form.'</div></div></div>'),['portal'=>'admin']);
     }
 
     private function saveCoupon(): void
     {
         $this->requireRole('admin');
-        $code=strtoupper(trim($_POST['code']??''));
-        if(!$code) throw new RuntimeException('Coupon code is required.');
+        $codeInput = (string)($_POST['code'] ?? ($_POST['coupon_code'] ?? ''));
+        $code = strtoupper(trim($codeInput));
+        if(!$code) {
+            $this->flash('error','Enter a coupon code before saving.');
+            $this->redirect('/dashboard/coupons');
+        }
         $type = ($_POST['type']??'percent')==='fixed'?'fixed':'percent';
         $value = max(0, (float)($_POST['value']??0));
         $packageId = (int)($_POST['package_id'] ?? 0);
