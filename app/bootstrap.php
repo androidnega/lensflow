@@ -44,6 +44,7 @@ final class App
                 '/login' => 'loginForm',
                 '/logout' => 'logout',
                 '/auth/otp' => 'otpForm',
+                '/sms/dlr' => 'smsDeliveryReport',
                 '/client/dashboard' => 'clientDashboard',
                 '/client/new-booking' => 'clientNewBooking',
                 '/client/bookings' => 'clientBookings',
@@ -2068,7 +2069,8 @@ SQL;
         if($bookingStatus==='confirmed'){
             $this->db->prepare("UPDATE timeline SET status='completed',completed_at=? WHERE booking_id=? AND sort_order=1")->execute([$this->now(),$p['booking_id']]);
         }
-        $this->sendSms($p['phone'],"Hi {$p['first_name']}, your payment of ".$this->money((float)$p['amount'])." for {$p['booking_code']} has been verified. Log in to continue your booking.");
+        $balance = max(0, (float)$b['total'] - $paid);
+        $this->sendSms($p['phone'],"Hi {$p['first_name']}, receipt confirmed for {$p['booking_code']}. We received ".$this->money((float)$p['amount']).". Total paid: ".$this->money($paid).". Balance left: ".$this->money($balance).". Log in to your portal for full details.");
         $this->flash('success','Payment verified and client notification processed.');
         $this->redirect('/dashboard/booking?id='.$p['booking_id']);
     }
@@ -3143,11 +3145,36 @@ TEXT;
         return (int)$stmt->fetchColumn();
     }
 
+    private function smsDeliveryReport(): void
+    {
+        $smsId = trim((string)($_GET['sms_id'] ?? ''));
+        $status = strtoupper(trim((string)($_GET['status'] ?? '')));
+        if ($smsId !== '') {
+            $stmt = $this->db->prepare("SELECT id, response FROM sms_log WHERE response LIKE ? ORDER BY id DESC LIMIT 1");
+            $stmt->execute(['%'.$smsId.'%']);
+            $row = $stmt->fetch();
+            if ($row) {
+                $existing = (string)($row['response'] ?? '');
+                $suffix = "\nDLR status: ".($status !== '' ? $status : 'UNKNOWN')." @ ".$this->now();
+                $nextStatus = match ($status) {
+                    'DELIVERED' => 'delivered',
+                    'SUBMITTED', 'QUEUED' => 'sent',
+                    'PROHIBITED', 'NOT_DELIVERED', 'EXPIRED' => 'error',
+                    default => strtolower($status ?: 'sent'),
+                };
+                $this->db->prepare("UPDATE sms_log SET status=?, response=? WHERE id=?")
+                    ->execute([$nextStatus, trim($existing.$suffix), (int)$row['id']]);
+            }
+        }
+        header('Content-Type: application/json');
+        echo json_encode(['ok' => true]);
+    }
+
     /** @return array{provider:string,status:string,response:string} */
     private function sendSms(string $phone, string $message): array
     {
         $provider = $this->smsProvider();
-        $sender = $this->cfg('sms_sender', 'iBuk');
+        $sender = $this->smsSenderId();
         $to = $this->smsPhone($phone);
         $segments = max(1, (int)ceil(mb_strlen($message) / 160));
         $unit = (float)$this->cfg('sms_unit_cost', '0.04');
@@ -3164,7 +3191,12 @@ TEXT;
                 $res = $this->httpJson(
                     'POST',
                     'https://sms.arkesel.com/api/v2/sms/send',
-                    ['sender' => $sender, 'message' => $message, 'recipients' => [$to]],
+                    [
+                        'sender' => $sender,
+                        'message' => $message,
+                        'recipients' => [$to],
+                        'callback_url' => $this->url('/sms/dlr'),
+                    ],
                     ['api-key: '.$key, 'Content-Type: application/json']
                 );
                 $response = $res['raw'];
@@ -3232,6 +3264,15 @@ TEXT;
         $p = strtolower($this->cfg('sms_provider', (string)($this->config['sms']['driver'] ?? 'log')));
         if ($p === 'webhook') $p = 'log';
         return in_array($p, ['log', 'arkesel', 'moolre'], true) ? $p : 'log';
+    }
+
+    private function smsSenderId(): string
+    {
+        $sender = trim($this->cfg('sms_sender', 'iBuk'));
+        $clean = preg_replace('/[^A-Za-z0-9 ]+/', '', $sender) ?? '';
+        $clean = trim(preg_replace('/\s+/', ' ', $clean) ?? '');
+        if ($clean === '') $clean = 'iBuk';
+        return substr($clean, 0, 11);
     }
 
     private function smsPhone(string $phone): string
