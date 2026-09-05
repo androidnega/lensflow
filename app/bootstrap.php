@@ -1313,7 +1313,7 @@ SQL;
             $this->cfg('otp_sms_template', 'Your {app} code is {otp}. It expires in 10 minutes.')
         );
         $this->sendSms($phone, $otpMsg);
-        if ((($this->config['sms']['driver'] ?? 'log') === 'log')) {
+        if ($this->smsProvider() === 'log') {
             $this->flash('success','OTP sent. For local testing, use code '.$otp.'.');
         } else {
             $this->flash('success','OTP sent to your phone. Enter it to continue.');
