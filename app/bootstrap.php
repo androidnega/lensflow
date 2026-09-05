@@ -574,7 +574,6 @@ SQL;
 
     private function home(): void
     {
-        $meta = $this->packageCategoryMeta();
         $slides = $this->homeSlides();
         $lookbook = $this->homeLookbook();
         $app = htmlspecialchars($this->cfg('app_name', 'iBuk.online'));
@@ -621,30 +620,6 @@ SQL;
             $mosaicSide .= '<figure class="home-mosaic-side"><img src="'.htmlspecialchars($side['src']).'" alt="'.htmlspecialchars($side['alt']).'" width="820" height="1024" loading="lazy" decoding="async"></figure>';
         }
 
-        $frames = '';
-        foreach ($lookbook as $item) {
-            $frames .= '<figure class="home-frame"><img src="'.htmlspecialchars($item['src']).'" alt="'.htmlspecialchars($item['alt']).'" width="820" height="1024" loading="lazy" decoding="async"></figure>';
-        }
-
-        $colImages = [
-            'wedding' => $this->url('/assets/home/couple-venue.jpg'),
-            'baby' => $this->url('/assets/packages/cover-baby.jpg'),
-            'studio' => $this->url('/assets/home/studio-blue.jpg'),
-        ];
-        $collections = '';
-        foreach ($meta as $slug => $info) {
-            $img = $colImages[$slug] ?? ($lookbook[0]['src'] ?? '');
-            $collections .= '<a class="home-collection" href="'.$this->url('/packages/'.$slug).'">
-              <span class="home-collection-media"><img src="'.htmlspecialchars($img).'" alt="" width="820" height="1024" loading="lazy" decoding="async"></span>
-              <span class="home-collection-copy">
-                <span class="home-collection-kicker">Sessions</span>
-                <span class="home-collection-title">'.htmlspecialchars($info['label']).'</span>
-                <span class="home-collection-blurb">'.htmlspecialchars($info['blurb']).'</span>
-                <span class="home-collection-go">View packages →</span>
-              </span>
-            </a>';
-        }
-
         $waBtn = $waHref !== ''
             ? '<a class="home-cta-ghost" href="'.htmlspecialchars($waHref).'" target="_blank" rel="noopener">WhatsApp</a>'
             : '';
@@ -669,40 +644,6 @@ SQL;
               </div>
             </div>
           </section>
-          <section class="home-section">
-            <div class="home-section-head">
-              <p class="home-kicker">Selected frames</p>
-              <h2 class="home-section-title">A quieter kind of luxury.</h2>
-            </div>
-            <div class="home-frames">'.$frames.'</div>
-          </section>
-          <section class="home-section">
-            <div class="home-section-head">
-              <p class="home-kicker">Book a session</p>
-              <h2 class="home-section-title">Choose how you want to be seen.</h2>
-            </div>
-            <div class="home-collections">'.$collections.'</div>
-          </section>
-          <section class="home-section">
-            <div class="home-section-head">
-              <p class="home-kicker">How it works</p>
-              <h2 class="home-section-title">Booked in minutes.</h2>
-            </div>
-            <ol class="home-steps">
-              <li><span>01</span><h3>Pick a package</h3><p>Wedding, baby or studio — every offer lists what is included.</p></li>
-              <li><span>02</span><h3>Pay with MoMo</h3><p>Send the deposit or pay in parts. Your booking code is the reference.</p></li>
-              <li><span>03</span><h3>Follow along</h3><p>Contract, timeline and soft copies live in your client portal.</p></li>
-            </ol>
-          </section>
-          <section class="home-band">
-            <p class="home-kicker">Ready when you are</p>
-            <h2 class="home-section-title">Let\'s make something you will keep.</h2>
-            <a class="home-cta" href="'.$this->url('/packages').'">'.$cta.'</a>
-          </section>
-          <footer class="home-foot">
-            <p>'.$app.'</p>
-            <p>Photography studio · Accra</p>
-          </footer>
         </div>
         <script>
         (() => {
@@ -1301,7 +1242,7 @@ SQL;
     {
         $this->requireRole('client');
         $booking = $this->bookingById((int)($_GET['id'] ?? 0), (int)$this->user['id']);
-        if (!$booking) $this->notFound(); return;
+        if (!$booking) { $this->notFound(); return; }
 
         $paid = $this->bookingPaid((int)$booking['id']);
         $balance = max(0,(float)$booking['total']-$paid);
@@ -1323,8 +1264,12 @@ SQL;
             }
         }
 
+        $cover = htmlspecialchars($this->packageCoverUrl([
+            'cover_image' => (string)($booking['cover_image'] ?? ''),
+            'category' => (string)($booking['package_category'] ?? 'wedding'),
+        ]));
         $body = $this->clientShell('Booking '.$booking['booking_code'],
-            '<div class="grid lg:grid-cols-[1.3fr_.7fr] gap-5"><div class="space-y-5"><div class="rounded-3xl border border-slate-200 bg-white p-5"><div class="flex flex-wrap items-start justify-between gap-4"><div><p class="text-xs font-bold uppercase tracking-wider text-slate-400">'.$booking['booking_code'].'</p><h2 class="mt-1 text-xl font-black">'.htmlspecialchars($booking['package_name']).'</h2><p class="mt-2 text-sm text-slate-600">'.htmlspecialchars($booking['event_type'] ?: 'Photography booking').' · '.htmlspecialchars($booking['event_date'] ?: 'Date to be confirmed').'</p></div>'.$this->badge($booking['status']).'</div><div class="mt-5 grid grid-cols-3 gap-3">'.$this->mini('Total',$this->money((float)$booking['total'])).$this->mini('Paid',$this->money($paid)).$this->mini('Balance',$this->money($balance)).'</div></div>'.$paymentBlock.$terms.'</div><aside><div class="rounded-3xl border border-slate-200 bg-white p-5 sticky top-24"><h3 class="font-black">Journey to your images</h3><p class="mt-1 text-xs text-stone-500">Follow each step until soft copies unlock.</p><div class="mt-5">'.$timeline.'</div></div></aside></div>'
+            '<div class="grid lg:grid-cols-[1.3fr_.7fr] gap-5"><div class="space-y-5"><div class="rounded-3xl border border-slate-200 bg-white overflow-hidden"><div class="offer-detail-media"><img src="'.$cover.'" alt="'.htmlspecialchars($booking['package_name']).'" width="1200" height="800" decoding="async"></div><div class="p-5"><div class="flex flex-wrap items-start justify-between gap-4"><div><p class="text-xs font-bold uppercase tracking-wider text-slate-400">'.$booking['booking_code'].'</p><h2 class="mt-1 text-xl font-black">'.htmlspecialchars($booking['package_name']).'</h2><p class="mt-2 text-sm text-slate-600">'.htmlspecialchars($booking['event_type'] ?: 'Photography booking').' · '.htmlspecialchars($booking['event_date'] ?: 'Date to be confirmed').'</p></div>'.$this->badge($booking['status']).'</div><div class="mt-5 grid grid-cols-3 gap-3">'.$this->mini('Total',$this->money((float)$booking['total'])).$this->mini('Paid',$this->money($paid)).$this->mini('Balance',$this->money($balance)).'</div></div></div>'.$paymentBlock.$terms.'</div><aside><div class="rounded-3xl border border-slate-200 bg-white p-5 sticky top-24"><h3 class="font-black">Journey to your images</h3><p class="mt-1 text-xs text-stone-500">Follow each step until soft copies unlock.</p><div class="mt-5">'.$timeline.'</div></div></aside></div>'
         );
         $this->render('Booking',$body,['portal'=>'client']);
     }
@@ -1333,7 +1278,7 @@ SQL;
     {
         $this->requireRole('client');
         $booking = $this->bookingById((int)($_POST['booking_id'] ?? 0),(int)$this->user['id']);
-        if (!$booking) $this->notFound(); return;
+        if (!$booking) { $this->notFound(); return; }
         $amount = (float)($_POST['amount'] ?? 0);
         $momoRef = trim($_POST['momo_reference'] ?? '');
         $sender = trim($_POST['sender_number'] ?? '');
@@ -1352,7 +1297,7 @@ SQL;
     {
         $this->requireRole('client');
         $booking = $this->bookingById((int)($_POST['booking_id'] ?? 0),(int)$this->user['id']);
-        if (!$booking) $this->notFound(); return;
+        if (!$booking) { $this->notFound(); return; }
         if (($_POST['agree'] ?? '') !== '1') {
             $this->flash('error','You must accept to continue.');
             $this->redirect('/client/booking?id='.$booking['id']);
@@ -1395,9 +1340,9 @@ SQL;
         $stmt = $this->db->prepare("SELECT f.* FROM files f JOIN bookings b ON b.id=f.booking_id WHERE f.id=? AND b.user_id=?");
         $stmt->execute([(int)($_GET['id'] ?? 0),$this->user['id']]);
         $file = $stmt->fetch();
-        if (!$file) $this->notFound(); return;
+        if (!$file) { $this->notFound(); return; }
         $path = __DIR__ . '/../storage/uploads/deliveries/' . basename($file['stored_name']);
-        if (!is_file($path)) $this->notFound(); return;
+        if (!is_file($path)) { $this->notFound(); return; }
         header('Content-Type: '.($file['mime_type'] ?: 'application/octet-stream'));
         header('Content-Length: '.filesize($path));
         header('Content-Disposition: attachment; filename="'.str_replace('"','', $file['original_name']).'"');
@@ -1599,7 +1544,7 @@ SQL;
         $stmt = $this->db->prepare("SELECT b.*,p.name package_name,u.first_name,u.last_name,u.phone,u.email FROM bookings b JOIN packages p ON p.id=b.package_id JOIN users u ON u.id=b.user_id WHERE b.id=?");
         $stmt->execute([$id]);
         $b = $stmt->fetch();
-        if (!$b) $this->notFound(); return;
+        if (!$b) { $this->notFound(); return; }
 
         $payments = $this->db->prepare("SELECT * FROM payments WHERE booking_id=? ORDER BY id DESC");
         $payments->execute([$id]);
@@ -1638,7 +1583,7 @@ SQL;
         $id=(int)($_POST['payment_id']??0);
         $stmt=$this->db->prepare("SELECT pay.*,b.user_id,b.id booking_id,b.booking_code,u.phone,u.first_name FROM payments pay JOIN bookings b ON b.id=pay.booking_id JOIN users u ON u.id=b.user_id WHERE pay.id=?");
         $stmt->execute([$id]); $p=$stmt->fetch();
-        if(!$p) $this->notFound(); return;
+        if (!$p) { $this->notFound(); return; }
         $this->db->prepare("UPDATE payments SET status='verified',verified_at=?,verified_by=? WHERE id=?")->execute([$this->now(),$this->user['id'],$id]);
         $paid=$this->bookingPaid((int)$p['booking_id']);
         $b=$this->bookingById((int)$p['booking_id']);
@@ -1659,7 +1604,7 @@ SQL;
         $id=(int)($_POST['payment_id']??0);
         $stmt=$this->db->prepare("SELECT pay.*,b.id booking_id,u.phone,u.first_name FROM payments pay JOIN bookings b ON b.id=pay.booking_id JOIN users u ON u.id=b.user_id WHERE pay.id=?");
         $stmt->execute([$id]); $p=$stmt->fetch();
-        if(!$p)$this->notFound(); return;
+        if (!$p) { $this->notFound(); return; }
         $this->db->prepare("UPDATE payments SET status='rejected',verified_at=?,verified_by=? WHERE id=?")->execute([$this->now(),$this->user['id'],$id]);
         $this->sendSms($p['phone'],"Hi {$p['first_name']}, we could not verify your submitted MoMo payment. Please check the transaction reference and resubmit from your portal.");
         $this->flash('success','Payment rejected.');
@@ -2403,7 +2348,7 @@ SQL;
 
     private function bookingById(int $id,?int $userId=null): ?array
     {
-        $sql="SELECT b.*,p.name package_name,p.deposit_percent,p.turnaround_days,p.category package_category FROM bookings b JOIN packages p ON p.id=b.package_id WHERE b.id=?";
+        $sql="SELECT b.*,p.name package_name,p.deposit_percent,p.turnaround_days,p.category package_category,p.cover_image FROM bookings b JOIN packages p ON p.id=b.package_id WHERE b.id=?";
         $params=[$id];
         if($userId!==null){$sql.=" AND b.user_id=?";$params[]=$userId;}
         $stmt=$this->db->prepare($sql);$stmt->execute($params);$b=$stmt->fetch();
@@ -2707,8 +2652,8 @@ body:has(#site-menu:checked) main{pointer-events:none}
 }
 
 /* —— Homepage —— */
-.home-page-inner{max-width:76rem;margin:0 auto;padding:0 0 calc(2.5rem + env(safe-area-inset-bottom))}
-.home-hero{display:flex;flex-direction:column;gap:1.45rem;padding:1.2rem 1.15rem 2.4rem}
+.home-page-inner{max-width:76rem;margin:0 auto;padding:0 0 1.1rem}
+.home-hero{display:flex;flex-direction:column;gap:1.45rem;padding:1.2rem 1.15rem 1.1rem}
 .home-hero-copy{animation:home-rise .7s ease .05s both}
 .home-kicker{margin:0;font-size:.68rem;font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:#a8a29e}
 .home-headline{margin:.55rem 0 0;font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(2.45rem,8.6vw,5rem);font-weight:600;letter-spacing:-.03em;line-height:1.05;color:#14110f;max-width:8.2ch}
@@ -2720,72 +2665,34 @@ body:has(#site-menu:checked) main{pointer-events:none}
 .home-cta:active{transform:scale(.98)}
 .home-cta-ghost{display:inline-flex;align-items:center;justify-content:center;min-height:2.75rem;padding:0 1.15rem;border-radius:999px;border:1px solid rgba(28,25,23,.14);color:#44403c;font-size:.84rem;font-weight:650;text-decoration:none;background:transparent}
 .home-cta-ghost:hover{border-color:#14110f;color:#14110f}
+.home-hero-stage{min-height:0}
 .home-mosaic{display:block}
-.home-mosaic-main{position:relative;overflow:hidden;border-radius:1.35rem;height:min(68svh,32rem);background:#1c1917;box-shadow:0 18px 40px rgba(28,25,23,.1)}
+.home-mosaic-main{position:relative;overflow:hidden;border-radius:1.35rem;height:min(58svh,28rem);background:#1c1917;box-shadow:0 18px 40px rgba(28,25,23,.1)}
 .home-mosaic-side{display:none;margin:0}
 .home-slide{position:absolute;inset:0;margin:0;opacity:0;transition:opacity 1.1s ease;z-index:0}
 .home-slide.is-active{opacity:1;z-index:1}
-.home-slide img,.home-slide-empty,.home-mosaic-side img,.home-frame img,.home-collection-media img{width:100%;height:100%;object-fit:cover;object-position:center 18%;display:block}
+.home-slide img,.home-slide-empty,.home-mosaic-side img{width:100%;height:100%;object-fit:cover;object-position:center 18%;display:block}
 .home-slide img{transform:scale(1);filter:contrast(1.04) saturate(1.03);backface-visibility:hidden;-webkit-backface-visibility:hidden}
 .home-slide.is-active img{animation:home-drift 16s ease-out forwards}
 .home-slide-empty{background:#1c1917}
-.home-section{padding:0 1.15rem 3.4rem}
-.home-section-head{max-width:34rem;margin:0 0 1.45rem}
-.home-section-title{margin:.4rem 0 0;font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(1.75rem,4vw,2.65rem);font-weight:600;letter-spacing:-.02em;color:#14110f;text-wrap:balance;max-width:16ch}
-.home-frames{display:grid;grid-template-columns:1fr 1fr;gap:.55rem}
-.home-frame{margin:0;overflow:hidden;border-radius:1rem;background:#e7e5e4;aspect-ratio:3/4}
-.home-frame img{transition:transform .7s ease}
-.home-frame:hover img{transform:scale(1.04)}
-.home-frame:first-child{grid-column:1 / -1;aspect-ratio:4/5}
-.home-collections{display:grid;gap:1rem}
-.home-collection{display:flex;flex-direction:column;text-decoration:none;color:inherit;background:#fff;border-radius:1.35rem;overflow:hidden;border:1px solid rgba(28,25,23,.08);transition:transform .2s ease,box-shadow .2s ease}
-.home-collection:hover{transform:translateY(-3px);box-shadow:0 16px 36px rgba(28,25,23,.08)}
-.home-collection-media{display:block;aspect-ratio:3/4;overflow:hidden;background:#e7e5e4}
-.home-collection-copy{display:flex;flex-direction:column;gap:.35rem;padding:1.15rem 1.15rem 1.3rem}
-.home-collection-title{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:1.4rem;font-weight:600;color:#14110f;letter-spacing:-.01em}
-.home-collection-blurb{font-size:.85rem;line-height:1.5;color:#78716c}
-.home-collection-go{margin-top:.4rem;font-size:.78rem;font-weight:700;color:#14110f}
-.home-steps{list-style:none;margin:0;padding:0;display:grid;gap:.25rem}
-.home-steps li{padding:1.15rem 0;border-top:1px solid rgba(28,25,23,.1)}
-.home-steps span{display:block;font-size:.72rem;font-weight:700;letter-spacing:.16em;color:#a8a29e}
-.home-steps h3{margin:.4rem 0 0;font-size:1.12rem;font-weight:700;color:#14110f}
-.home-steps p{margin:.4rem 0 0;font-size:.9rem;line-height:1.55;color:#78716c}
-.home-band{margin:0 1.15rem 2rem;padding:2.4rem 1.4rem;border-radius:1.5rem;background:#14110f;color:#fafaf9;text-align:center}
-.home-band .home-kicker{color:rgba(250,250,249,.45)}
-.home-band .home-section-title{color:#fff;max-width:22rem;margin:.45rem auto 0}
-.home-band .home-cta{background:#fff;color:#14110f;margin-top:1.25rem}
-.home-band .home-cta:hover{background:#f5f5f4}
-.home-foot{padding:0 1.15rem;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;font-size:.78rem;color:#a8a29e}
 @keyframes home-rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 @keyframes home-drift{from{transform:scale(1)}to{transform:scale(1.035)}}
 @media (prefers-reduced-motion:reduce){
   .home-hero-copy,.home-slide img{animation:none!important;opacity:1;transform:none}
   .home-slide{transition:none}
-  .home-collection{transition:none}
-}
-@media (min-width:768px){
-  .home-frames{grid-template-columns:repeat(12,1fr);gap:.85rem}
-  .home-frame{border-radius:1.15rem;aspect-ratio:4/5}
-  .home-frame:first-child{grid-column:auto;aspect-ratio:4/5}
-  .home-frame:nth-child(1){grid-column:span 7}
-  .home-frame:nth-child(2){grid-column:span 5}
-  .home-frame:nth-child(3){grid-column:span 4}
-  .home-frame:nth-child(4){grid-column:span 4}
-  .home-frame:nth-child(5){grid-column:span 4}
-  .home-frame:nth-child(6){grid-column:span 5}
-  .home-frame:nth-child(7){grid-column:span 7}
-  .home-collections{grid-template-columns:repeat(3,1fr);gap:1rem}
-  .home-steps{grid-template-columns:repeat(3,1fr);gap:1.25rem}
-  .home-steps li{padding:1.25rem 0 0;border-top:1px solid rgba(28,25,23,.1)}
 }
 @media (min-width:900px){
-  .home-hero{display:grid;grid-template-columns:minmax(18rem,.9fr) minmax(0,1.28fr);align-items:center;gap:2.15rem;padding:1.4rem 1.75rem 2.6rem}
+  html:has(body.home-page),body.home-page{height:100svh;overflow:hidden}
+  .home-page-inner{height:calc(100svh - 3.4rem);max-width:76rem;padding:0}
+  .home-hero{display:grid;grid-template-columns:minmax(18rem,.9fr) minmax(0,1.28fr);align-items:center;gap:2.15rem;height:100%;min-height:0;padding:1.25rem 1.75rem 1.4rem}
   .home-headline{font-size:clamp(3.3rem,5.2vw,5rem)}
-  .home-mosaic{display:grid;grid-template-columns:1.38fr .72fr;grid-template-rows:1fr 1fr;gap:.7rem;height:min(78vh,40.5rem)}
+  .home-hero-stage{height:100%}
+  .home-mosaic{display:grid;grid-template-columns:1.38fr .72fr;grid-template-rows:1fr 1fr;gap:.7rem;height:100%;min-height:0}
   .home-mosaic-main{grid-row:1 / span 2;height:100%;border-radius:1.5rem}
   .home-mosaic-side{display:block;overflow:hidden;border-radius:1.15rem;min-height:0;background:#e7e5e4}
-  .home-section,.home-band,.home-foot{padding-left:1.75rem;padding-right:1.75rem}
-  .home-band{margin-left:1.75rem;margin-right:1.75rem;padding:3rem 2rem}
+}
+@media (min-width:1024px){
+  .home-page-inner{height:calc(100svh - 4rem)}
 }
 
 .site-header{position:sticky;top:0;z-index:140;isolation:isolate;border-bottom:1px solid rgba(231,229,228,.9);background:#fff}
