@@ -2606,10 +2606,10 @@ SQL;
     private function adminCoupons(): void
     {
         $this->requireRole('admin');
-        $packages = $this->db->query("SELECT id,name,category FROM packages ORDER BY CASE category WHEN 'wedding' THEN 1 WHEN 'baby' THEN 2 WHEN 'studio' THEN 3 ELSE 4 END, price ASC, id ASC")->fetchAll();
+        $packages = $this->db->query("SELECT id,name,category,price FROM packages ORDER BY CASE category WHEN 'wedding' THEN 1 WHEN 'baby' THEN 2 WHEN 'studio' THEN 3 ELSE 4 END, price ASC, id ASC")->fetchAll();
         $packageOptions = '<option value="0">All packages</option>';
         foreach ($packages as $pkg) {
-            $packageOptions .= '<option value="'.(int)$pkg['id'].'">'.htmlspecialchars($pkg['name'].' · '.ucfirst((string)$pkg['category'])).'</option>';
+            $packageOptions .= '<option value="'.(int)$pkg['id'].'">'.htmlspecialchars($pkg['name'].' · '.ucfirst((string)$pkg['category']).' · '.$this->money((float)$pkg['price'])).'</option>';
         }
         $rows='';
         foreach($this->db->query("SELECT c.*,p.name package_name,p.category package_category FROM coupons c LEFT JOIN packages p ON p.id=c.package_id ORDER BY c.id DESC")->fetchAll() as $c){
