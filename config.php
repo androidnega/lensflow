@@ -22,7 +22,8 @@ return [
         'path' => __DIR__ . '/storage/database.sqlite',
     ],
 
-    // SMS: prefer Admin → Settings (Arkesel / Moolre). "log" for local testing.
+    // SMS: values here now override dashboard SMS settings when set.
+    // Set driver to "arkesel" or "moolre" on the server for live SMS.
     'sms' => [
         'driver' => 'log',
         'webhook_url' => '',

@@ -22,8 +22,8 @@ return [
         'path' => __DIR__ . '/storage/database.sqlite',
     ],
 
-    // SMS defaults (override live keys in Admin → Settings).
-    // Drivers in settings: log | arkesel | moolre
+    // SMS: values here override dashboard SMS settings when set.
+    // Use driver: log | arkesel | moolre
     'sms' => [
         'driver' => 'log',
         'webhook_url' => '',
