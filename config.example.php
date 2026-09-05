@@ -5,6 +5,9 @@ return [
     'timezone' => 'Africa/Accra',
     'currency' => 'GHS',
     'admin_email' => 'admin@example.com',
+    'admin_login' => 'admin',
+    'admin_phone' => '0200000000',
+    'admin_password' => 'ChangeMeBeforeProduction',
 
     // Photographer / payment details
     'photographer_name' => 'iBuk.online',

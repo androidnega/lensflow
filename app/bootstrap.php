@@ -344,17 +344,7 @@ SQL;
         $this->seedCataloguePackages();
         $this->syncWeddingPackages();
 
-        $admin = $this->db->prepare("SELECT id FROM users WHERE role='admin' LIMIT 1");
-        $admin->execute();
-        if (!$admin->fetch()) {
-            $stmt = $this->db->prepare("INSERT INTO users (role,first_name,last_name,phone,email,password_hash,created_at) VALUES ('admin',?,?,?,?,?,?)");
-            $stmt->execute([
-                'Studio','Admin','0200000000',
-                $this->config['admin_email'] ?? 'admin@example.com',
-                password_hash('ChangeMe123!', PASSWORD_DEFAULT),
-                $this->now()
-            ]);
-        }
+        $this->syncAdminAccount();
 
         $defaults = [
             'app_name' => 'iBuk.online',
@@ -508,6 +498,25 @@ SQL;
                 $slug,
             ]);
         }
+    }
+
+    private function syncAdminAccount(): void
+    {
+        $login = trim((string)($this->config['admin_login'] ?? 'admin'));
+        $phone = $this->normalizePhone((string)($this->config['admin_phone'] ?? '0200000000'));
+        $password = (string)($this->config['admin_password'] ?? 'ChangeMe123!');
+        $email = (string)($this->config['admin_email'] ?? 'admin@example.com');
+        $firstName = $login !== '' ? ucfirst($login) : 'Admin';
+
+        $admin = $this->db->query("SELECT * FROM users WHERE role='admin' ORDER BY id ASC LIMIT 1")->fetch();
+        if (!$admin) {
+            $stmt = $this->db->prepare("INSERT INTO users (role,first_name,last_name,phone,email,password_hash,created_at) VALUES ('admin',?,?,?,?,?,?)");
+            $stmt->execute([$firstName, 'Admin', $phone, $email, password_hash($password, PASSWORD_DEFAULT), $this->now()]);
+            return;
+        }
+
+        $this->db->prepare("UPDATE users SET first_name=?, last_name=?, phone=?, email=?, password_hash=? WHERE id=?")
+            ->execute([$firstName, 'Admin', $phone, $email, password_hash($password, PASSWORD_DEFAULT), $admin['id']]);
     }
 
     private function seedHomeSlides(): void
@@ -1185,9 +1194,11 @@ SQL;
             http_response_code(403);
             exit('Forbidden');
         }
+        $hint = trim((string)($this->config['admin_login'] ?? 'admin'));
+        $placeholder = $hint !== '' ? $hint : 'admin';
         $body = $this->authLayout('Studio admin','Sign in with your admin phone and password.',
             '<form method="post" action="'.$this->url('/admin/login').'" class="space-y-4">'.$this->csrfField().
-            $this->input('phone','Admin phone','tel','','e.g. 0200000000').
+            $this->input('login','Admin username or phone','text','',$placeholder).
             $this->input('password','Password','password','','Enter admin password').
             '<button class="w-full rounded-2xl bg-slate-950 px-4 py-3 font-bold text-white">Sign in to admin</button></form>');
         $this->render('Admin login', $body);
@@ -1198,12 +1209,22 @@ SQL;
         if ($this->user && ($this->user['role'] ?? '') === 'admin') {
             $this->redirect('/dashboard');
         }
-        $phone = $this->normalizePhone((string)($_POST['phone'] ?? ''));
-        $stmt = $this->db->prepare("SELECT * FROM users WHERE phone=? LIMIT 1");
-        $stmt->execute([$phone]);
-        $user = $stmt->fetch();
-        if (!$user || ($user['role'] ?? '') !== 'admin' || !password_verify((string)($_POST['password'] ?? ''), $user['password_hash'])) {
+        $login = trim((string)($_POST['login'] ?? ''));
+        $password = (string)($_POST['password'] ?? '');
+        $configLogin = trim((string)($this->config['admin_login'] ?? 'admin'));
+        $configPhone = $this->normalizePhone((string)($this->config['admin_phone'] ?? '0200000000'));
+        $configPassword = (string)($this->config['admin_password'] ?? 'ChangeMe123!');
+        $matchConfig = ($configLogin !== '' && strcasecmp($login, $configLogin) === 0) || $this->normalizePhone($login) === $configPhone;
+        if (!$matchConfig || !hash_equals($configPassword, $password)) {
             $this->flash('error','Admin login failed. Check phone and password.');
+            $this->redirect('/admin');
+        }
+        $this->syncAdminAccount();
+        $stmt = $this->db->prepare("SELECT * FROM users WHERE role='admin' ORDER BY id ASC LIMIT 1");
+        $stmt->execute();
+        $user = $stmt->fetch();
+        if (!$user) {
+            $this->flash('error','Admin account is not ready yet.');
             $this->redirect('/admin');
         }
         $_SESSION['user_id'] = (int)$user['id'];
@@ -1262,11 +1283,55 @@ SQL;
         }
         $masked = $this->maskPhone((string)$otp['phone']);
         $body = $this->authLayout('Enter your code','We sent a 6-digit OTP to '.$masked.'.',
-            '<form method="post" action="'.$this->url('/auth/otp').'" class="space-y-4">'.$this->csrfField().'
-              <div><label class="text-sm font-bold">OTP code</label><input required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" name="otp" autocomplete="one-time-code" class="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center text-2xl font-bold tracking-[0.35em] outline-none focus:border-slate-400 placeholder:text-stone-300" placeholder="6-digit code"></div>
+            '<form method="post" action="'.$this->url('/auth/otp').'" class="space-y-4" id="otp-form">'.$this->csrfField().'
+              <input type="hidden" name="otp" id="otp-hidden" value="">
+              <div><label class="text-sm font-bold">OTP code</label>
+                <div class="mt-2 grid grid-cols-6 gap-2" id="otp-boxes">
+                  <input inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" class="otp-box h-14 rounded-2xl border border-slate-200 bg-white text-center text-xl font-black outline-none focus:border-slate-400" aria-label="OTP digit 1">
+                  <input inputmode="numeric" pattern="[0-9]*" maxlength="1" class="otp-box h-14 rounded-2xl border border-slate-200 bg-white text-center text-xl font-black outline-none focus:border-slate-400" aria-label="OTP digit 2">
+                  <input inputmode="numeric" pattern="[0-9]*" maxlength="1" class="otp-box h-14 rounded-2xl border border-slate-200 bg-white text-center text-xl font-black outline-none focus:border-slate-400" aria-label="OTP digit 3">
+                  <input inputmode="numeric" pattern="[0-9]*" maxlength="1" class="otp-box h-14 rounded-2xl border border-slate-200 bg-white text-center text-xl font-black outline-none focus:border-slate-400" aria-label="OTP digit 4">
+                  <input inputmode="numeric" pattern="[0-9]*" maxlength="1" class="otp-box h-14 rounded-2xl border border-slate-200 bg-white text-center text-xl font-black outline-none focus:border-slate-400" aria-label="OTP digit 5">
+                  <input inputmode="numeric" pattern="[0-9]*" maxlength="1" class="otp-box h-14 rounded-2xl border border-slate-200 bg-white text-center text-xl font-black outline-none focus:border-slate-400" aria-label="OTP digit 6">
+                </div>
+              </div>
               <button class="w-full rounded-2xl bg-slate-950 px-4 py-3 font-bold text-white">Verify & continue</button>
             </form>
             <form method="post" action="'.$this->url('/auth/otp-resend').'" class="mt-4 text-center">'.$this->csrfField().'<input type="hidden" name="phone" value="'.htmlspecialchars((string)$otp['phone']).'"><input type="hidden" name="package_id" value="'.(int)($otp['package_id']??0).'"><input type="hidden" name="intent" value="'.htmlspecialchars((string)($otp['intent']??'register')).'"><button class="text-sm font-bold text-slate-700">Resend OTP</button></form>');
+        $body .= '<script>
+        (() => {
+          const form = document.getElementById("otp-form");
+          const hidden = document.getElementById("otp-hidden");
+          const boxes = Array.from(document.querySelectorAll(".otp-box"));
+          if (!form || !hidden || boxes.length !== 6) return;
+          const sync = () => {
+            hidden.value = boxes.map((box) => box.value).join("");
+            if (hidden.value.length === 6) form.requestSubmit();
+          };
+          boxes.forEach((box, idx) => {
+            box.addEventListener("input", () => {
+              box.value = (box.value || "").replace(/\\D/g, "").slice(0, 1);
+              if (box.value && idx < boxes.length - 1) boxes[idx + 1].focus();
+              sync();
+            });
+            box.addEventListener("keydown", (e) => {
+              if (e.key === "Backspace" && !box.value && idx > 0) {
+                boxes[idx - 1].focus();
+              }
+            });
+            box.addEventListener("paste", (e) => {
+              const pasted = (e.clipboardData?.getData("text") || "").replace(/\\D/g, "").slice(0, 6);
+              if (!pasted) return;
+              e.preventDefault();
+              boxes.forEach((item, i) => item.value = pasted[i] || "");
+              const next = Math.min(pasted.length, boxes.length - 1);
+              boxes[next].focus();
+              sync();
+            });
+          });
+          boxes[0].focus();
+        })();
+        </script>';
         $this->render('Verify OTP', $body);
     }
 
@@ -1480,14 +1545,19 @@ SQL;
         foreach ($bookings as $b) $paid += $this->bookingPaid((int)$b['id']);
         $latest = '';
         foreach (array_slice($bookings,0,4) as $b) $latest .= $this->bookingRow($b, false);
-        if (!$latest) $latest = $this->emptyState('No bookings yet','Choose a package to start your first photography booking.','/packages','View packages');
         $note = trim($this->cfg('studio_note', ''));
         $noteBlock = $note !== '' ? '<div class="mt-5 rounded-3xl border border-stone-200 bg-white p-5 text-sm leading-6 text-stone-600">'.nl2br(htmlspecialchars($note)).'</div>' : '';
-        $body = $this->clientShell('Overview',
-            '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3">'.$this->stat('Bookings',(string)$active).$this->stat('Paid',$this->money($paid)).$this->stat('Files',(string)$this->clientFileCount()).$this->stat('Account','Active').'</div>'.
-            $noteBlock.
-            '<div class="mt-7 flex items-center justify-between"><h2 class="text-lg font-black">Recent bookings</h2><a href="'.$this->url('/client/new-booking').'" class="rounded-xl bg-slate-950 px-3 py-2 text-xs font-bold text-white">New booking</a></div><div class="mt-3 space-y-3">'.$latest.'</div>'
-        );
+        if ($active <= 0) {
+            $body = $this->clientShell('Overview',
+                '<div class="rounded-[2rem] border border-stone-200 bg-white p-6"><p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">Start here</p><h2 class="mt-2 text-3xl font-black text-stone-950">Book your first shoot</h2><p class="mt-3 text-sm leading-6 text-stone-500">Once you place your first booking, your portal cards, payments, and booking history will appear here.</p><a href="'.$this->url('/client/new-booking').'" class="mt-5 inline-flex rounded-full bg-stone-950 px-5 py-3 text-sm font-bold text-white">Book now</a></div>'.$noteBlock
+            );
+        } else {
+            $body = $this->clientShell('Overview',
+                '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3">'.$this->stat('Bookings',(string)$active).$this->stat('Paid',$this->money($paid)).$this->stat('Files',(string)$this->clientFileCount()).$this->stat('Account','Active').'</div>'.
+                $noteBlock.
+                '<div class="mt-7"><h2 class="text-lg font-black">Recent bookings</h2><div class="mt-3 space-y-3">'.$latest.'</div></div>'
+            );
+        }
         $this->render('Client dashboard',$body,['portal'=>'client']);
     }
 
@@ -2712,6 +2782,14 @@ SQL;
         $stmt=$this->db->prepare("SELECT COUNT(*) FROM files f JOIN bookings b ON b.id=f.booking_id WHERE b.user_id=?");$stmt->execute([$this->user['id']]);return (int)$stmt->fetchColumn();
     }
 
+    private function clientBookingCount(): int
+    {
+        if (!$this->user || ($this->user['role'] ?? '') !== 'client') return 0;
+        $stmt = $this->db->prepare("SELECT COUNT(*) FROM bookings WHERE user_id=?");
+        $stmt->execute([$this->user['id']]);
+        return (int)$stmt->fetchColumn();
+    }
+
     private function sendSms(string $phone, string $message): void
     {
         $provider = $this->smsProvider();
@@ -3207,6 +3285,7 @@ body.portal-app{min-height:100svh;background:#f3f1ee}
     private function clientShell(string $title, string $content): string
     {
         $name = htmlspecialchars($this->cfg('app_name', 'iBuk.online'));
+        $canBookFirst = $this->clientBookingCount() === 0;
         $items = [
             ['/client/dashboard', 'Home'],
             ['/client/bookings', 'Bookings'],
@@ -3241,7 +3320,7 @@ body.portal-app{min-height:100svh;background:#f3f1ee}
               <span><span class="portal-brand-name">'.$name.'</span><span class="portal-brand-sub">Client portal</span></span>
             </a>
             <div class="portal-top-actions">
-              <a class="portal-chip" href="'.$this->url('/client/new-booking').'">Book</a>
+              '.($canBookFirst ? '<a class="portal-chip" href="'.$this->url('/client/new-booking').'">Book</a>' : '').'
               <a class="portal-chip" href="'.$this->url('/logout').'">Log out</a>
             </div>
           </header>
