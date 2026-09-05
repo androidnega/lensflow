@@ -49,6 +49,7 @@ final class App
                 '/client/new-booking' => 'clientNewBooking',
                 '/client/bookings' => 'clientBookings',
                 '/client/booking' => 'clientBookingDetail',
+                '/client/contract-download' => 'downloadContractPdf',
                 '/client/payments' => 'clientPayments',
                 '/client/files' => 'clientFiles',
                 '/client/profile' => 'clientProfile',
@@ -1734,7 +1735,8 @@ SQL;
                     : $this->cheatSheetFormHtml($booking);
             } else {
                 $label = $this->needsFullContract($booking) ? 'Contract accepted' : 'Cheat sheet acknowledged';
-                $terms = '<div class="rounded-3xl border border-emerald-100 bg-emerald-50 p-5 text-sm text-emerald-800"><strong>'.$label.'.</strong> On '.htmlspecialchars((string)$booking['contract_accepted_at']).'.</div>';
+                $download = '<a href="'.$this->url('/client/contract-download?id='.(int)$booking['id']).'" class="inline-flex rounded-full bg-emerald-700 px-4 py-2 text-xs font-bold text-white">Download contract PDF</a>';
+                $terms = '<div class="rounded-3xl border border-emerald-100 bg-emerald-50 p-5 text-sm text-emerald-800"><strong>'.$label.'.</strong> On '.htmlspecialchars((string)$booking['contract_accepted_at']).'.<div class="mt-3">'.$download.'</div></div>';
             }
         }
 
@@ -1777,11 +1779,57 @@ SQL;
             $this->flash('error','You must accept to continue.');
             $this->redirect('/client/booking?id='.$booking['id']);
         }
-        $this->db->prepare("UPDATE bookings SET contract_accepted=1,contract_accepted_at=?,updated_at=? WHERE id=?")->execute([$this->now(),$this->now(),$booking['id']]);
+        $acceptedAt = $this->now();
+        $snapshot = $this->contractSnapshotText($booking);
+        $signer = trim(($this->user['first_name'] ?? '').' '.($this->user['last_name'] ?? ''));
+        if ($signer === '') $signer = 'Client';
+        $contractFile = $this->writeContractPdf($booking, $snapshot, $signer, $acceptedAt);
+        $this->db->prepare("UPDATE bookings SET contract_accepted=1,contract_accepted_at=?,contract_text_snapshot=?,contract_signer_name=?,contract_ip=?,contract_file=?,updated_at=? WHERE id=?")
+            ->execute([
+                $acceptedAt,
+                $snapshot,
+                $signer,
+                (string)($_SERVER['REMOTE_ADDR'] ?? ''),
+                $contractFile,
+                $acceptedAt,
+                $booking['id'],
+            ]);
         $this->sendSms((string)$this->user['phone'], "Hi {$this->user['first_name']}, your service agreement for {$booking['booking_code']} has been accepted. We will keep you updated in your portal.");
         $msg = $this->needsFullContract($booking) ? 'Contract accepted. Your booking record has been updated.' : 'Cheat sheet acknowledged. You are ready for the session.';
         $this->flash('success',$msg);
         $this->redirect('/client/booking?id='.$booking['id']);
+    }
+
+    private function downloadContractPdf(): void
+    {
+        $this->requireRole('client');
+        $booking = $this->bookingById((int)($_GET['id'] ?? 0),(int)$this->user['id']);
+        if (!$booking) { $this->notFound(); return; }
+        if (!(int)($booking['contract_accepted'] ?? 0)) {
+            $this->flash('error','Accept the contract first before downloading it.');
+            $this->redirect('/client/booking?id='.$booking['id']);
+        }
+        $snapshot = trim((string)($booking['contract_text_snapshot'] ?? ''));
+        $signer = trim((string)($booking['contract_signer_name'] ?? (($this->user['first_name'] ?? '').' '.($this->user['last_name'] ?? ''))));
+        if ($snapshot === '' || trim((string)($booking['contract_file'] ?? '')) === '') {
+            $acceptedAt = trim((string)($booking['contract_accepted_at'] ?? '')) ?: $this->now();
+            $snapshot = $snapshot !== '' ? $snapshot : $this->contractSnapshotText($booking);
+            $file = $this->writeContractPdf($booking, $snapshot, $signer !== '' ? $signer : 'Client', $acceptedAt);
+            $this->db->prepare("UPDATE bookings SET contract_text_snapshot=COALESCE(NULLIF(contract_text_snapshot,''),?), contract_signer_name=COALESCE(NULLIF(contract_signer_name,''),?), contract_file=COALESCE(NULLIF(contract_file,''),?), updated_at=? WHERE id=?")
+                ->execute([$snapshot, $signer, $file, $this->now(), $booking['id']]);
+            $booking['contract_file'] = $file;
+        }
+        $path = __DIR__.'/../storage/contracts/'.basename((string)$booking['contract_file']);
+        if (!is_file($path)) {
+            $file = $this->writeContractPdf($booking, $snapshot !== '' ? $snapshot : $this->contractSnapshotText($booking), $signer !== '' ? $signer : 'Client', trim((string)($booking['contract_accepted_at'] ?? '')) ?: $this->now());
+            $this->db->prepare("UPDATE bookings SET contract_file=?, updated_at=? WHERE id=?")->execute([$file, $this->now(), $booking['id']]);
+            $path = __DIR__.'/../storage/contracts/'.basename($file);
+        }
+        header('Content-Type: application/pdf');
+        header('Content-Length: '.filesize($path));
+        header('Content-Disposition: attachment; filename="'.basename($path).'"');
+        readfile($path);
+        exit;
     }
 
     private function clientPayments(): void
@@ -3015,6 +3063,9 @@ TEXT;
         if ($contractText === '') {
             $contractText = $isWeddingContract ? $this->defaultWeddingContractText() : $this->defaultGeneralContractText();
         }
+        $paymentNote = $isWeddingContract
+            ? 'The remaining '.$balancePct.'% balance is due on the wedding day, immediately after the program, unless you agree otherwise with the studio in writing.'
+            : 'Any remaining balance must be cleared before final delivery unless the studio agrees otherwise in writing.';
         return '<div class="rounded-3xl border border-slate-200 bg-white p-5">
           <h3 class="font-black">'.($isWeddingContract ? 'Wedding &amp; traditional engagement agreement' : 'Service agreement').'</h3>
           <p class="mt-1 text-sm text-stone-500">'.($isWeddingContract ? 'Standard Ghana wedding and traditional engagement terms adapted for your booked package.' : 'Standard contract for photography, videography, portraits, baby events, and other booked sessions.').'</p>
@@ -3024,15 +3075,147 @@ TEXT;
             <div class="rounded-2xl bg-stone-50 p-4"><p class="text-[10px] font-bold uppercase tracking-wider text-stone-400">Package total</p><p class="mt-1 text-lg font-black">'.$this->money($total).'</p></div>
             <div class="rounded-2xl bg-stone-50 p-4"><p class="text-[10px] font-bold uppercase tracking-wider text-stone-400">Balance remaining</p><p class="mt-1 text-lg font-black">'.$this->money($balance).'</p></div>
           </div>
-          <p class="mt-3 text-xs text-stone-500">'.($category === 'wedding'
-            ? 'Wedding and engagement bookings may follow a '.$bookingPct.'% booking payment and '.$balancePct.'% balance structure. Partial payments are still allowed, but the remaining balance must be cleared before final delivery.'
-            : 'Partial payments are allowed, but any remaining balance must be cleared before final delivery unless the Studio agrees otherwise in writing.').'</p>
+          <p class="mt-3 text-xs text-stone-500">'.htmlspecialchars($paymentNote).'</p>
+          <div class="mt-3 rounded-2xl border border-sky-100 bg-sky-50 p-4 text-xs leading-6 text-sky-900">Editing, delivery updates, and the full post-event timeline will be communicated to you and can be tracked in your client portal.</div>
           <div class="mt-4 max-h-48 overflow-auto rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">'.nl2br(htmlspecialchars($contractText)).'</div>
           <form method="post" action="'.$this->url('/client/contract-accept').'" class="mt-4">'.$this->csrfField().'<input type="hidden" name="booking_id" value="'.$booking['id'].'">
             <label class="flex items-start gap-3 text-sm"><input required type="checkbox" class="mt-1" name="agree" value="1"><span>I have read and accept this service agreement, including the booking, payment, delivery, and usage terms shown above.</span></label>
             <button class="mt-4 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white">Accept contract</button>
           </form>
         </div>';
+    }
+
+    private function contractSnapshotText(array $booking): string
+    {
+        $category = (string)($booking['package_category'] ?? $booking['category'] ?? '');
+        $eventType = trim((string)($booking['event_type'] ?? ''));
+        $isWeddingContract = $category === 'wedding' || str_contains(strtolower($eventType), 'wedding') || str_contains(strtolower($eventType), 'engagement');
+        $base = trim((string)($booking['contract_text_snapshot'] ?? ''));
+        if ($base === '') {
+            $key = $isWeddingContract ? 'contract_text' : 'general_contract_text';
+            $base = trim($this->setting($key));
+        }
+        if ($base === '') {
+            $base = $isWeddingContract ? $this->defaultWeddingContractText() : $this->defaultGeneralContractText();
+        }
+        $bookingPct = $this->weddingBookingPercent();
+        $balancePct = max(0, 100 - $bookingPct);
+        $paymentNote = $isWeddingContract
+            ? "PAYMENT NOTE\nThe remaining {$balancePct}% balance is due on the wedding day, immediately after the program, unless otherwise agreed in writing.\n"
+            : "PAYMENT NOTE\nAny remaining balance must be cleared before final delivery unless otherwise agreed in writing.\n";
+        $trackingNote = "TRACKING NOTE\nEditing, delivery updates, and the post-event timeline will be communicated to the client and can be tracked in the client portal.\n";
+        $summary = [
+            'BOOKING SUMMARY',
+            'Booking code: '.(string)($booking['booking_code'] ?? ''),
+            'Package: '.(string)($booking['package_name'] ?? ''),
+            'Event type: '.($eventType !== '' ? $eventType : 'Photo / video service'),
+            'Event timing: '.$this->bookingEventSummary($booking),
+            'Total: '.$this->money((float)($booking['total'] ?? 0)),
+            'Deposit / amount due now: '.$this->money((float)($booking['deposit_required'] ?? 0)),
+            '',
+        ];
+        return trim(implode("\n", $summary).$paymentNote."\n".$trackingNote."\n".$base)."\n";
+    }
+
+    private function writeContractPdf(array $booking, string $snapshot, string $signer, string $acceptedAt): string
+    {
+        $dir = __DIR__.'/../storage/contracts';
+        if (!is_dir($dir)) mkdir($dir, 0775, true);
+        $filename = 'contract-'.preg_replace('/[^A-Za-z0-9\-]+/', '-', (string)($booking['booking_code'] ?? 'booking')).'.pdf';
+        $path = $dir.'/'.$filename;
+        $body = $this->contractPdfText($booking, $snapshot, $signer, $acceptedAt);
+        file_put_contents($path, $this->simpleTextPdf($body));
+        return $filename;
+    }
+
+    private function contractPdfText(array $booking, string $snapshot, string $signer, string $acceptedAt): string
+    {
+        $lines = [
+            strtoupper((string)($booking['package_name'] ?? 'SERVICE CONTRACT')),
+            'Contract PDF copy',
+            '',
+            'Booking code: '.(string)($booking['booking_code'] ?? ''),
+            'Client signer: '.$signer,
+            'Accepted at: '.$acceptedAt,
+            'Accepted IP: '.trim((string)($booking['contract_ip'] ?? ($_SERVER['REMOTE_ADDR'] ?? ''))),
+            'Event summary: '.$this->bookingEventSummary($booking),
+            'Total: '.$this->money((float)($booking['total'] ?? 0)),
+            'Deposit required: '.$this->money((float)($booking['deposit_required'] ?? 0)),
+            '',
+            trim($snapshot),
+        ];
+        return implode("\n", $lines);
+    }
+
+    private function simpleTextPdf(string $text): string
+    {
+        $rawLines = preg_split("/\\r\\n|\\n|\\r/", $text) ?: [];
+        $wrapped = [];
+        foreach ($rawLines as $line) {
+            $line = trim((string)$line);
+            if ($line === '') {
+                $wrapped[] = '';
+                continue;
+            }
+            foreach (explode("\n", wordwrap($line, 92, "\n", true)) as $part) {
+                $wrapped[] = $part;
+            }
+        }
+        $pages = [];
+        $chunk = [];
+        foreach ($wrapped as $line) {
+            $chunk[] = $line;
+            if (count($chunk) >= 42) {
+                $pages[] = $chunk;
+                $chunk = [];
+            }
+        }
+        if ($chunk) $pages[] = $chunk;
+        if (!$pages) $pages = [['Contract copy']];
+
+        $objects = [];
+        $pagesKids = [];
+        $fontObject = 3;
+        foreach ($pages as $i => $lines) {
+            $content = "BT\n/F1 11 Tf\n14 TL\n50 790 Td\n";
+            $first = true;
+            foreach ($lines as $line) {
+                $escaped = str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $line);
+                if ($first) {
+                    $content .= "({$escaped}) Tj\n";
+                    $first = false;
+                } else {
+                    $content .= "T*\n({$escaped}) Tj\n";
+                }
+            }
+            $content .= "ET\n";
+            $contentObject = 4 + ($i * 2);
+            $pageObject = 5 + ($i * 2);
+            $objects[$contentObject] = "<< /Length ".strlen($content)." >>\nstream\n".$content."endstream";
+            $objects[$pageObject] = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 {$fontObject} 0 R >> >> /Contents {$contentObject} 0 R >>";
+            $pagesKids[] = "{$pageObject} 0 R";
+        }
+        $objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+        $objects[2] = "<< /Type /Pages /Kids [".implode(' ', $pagesKids)."] /Count ".count($pages)." >>";
+        $objects[$fontObject] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+
+        ksort($objects);
+        $pdf = "%PDF-1.4\n";
+        $offsets = [0];
+        foreach ($objects as $num => $obj) {
+            $offsets[$num] = strlen($pdf);
+            $pdf .= $num." 0 obj\n".$obj."\nendobj\n";
+        }
+        $xref = strlen($pdf);
+        $max = max(array_keys($objects));
+        $pdf .= "xref\n0 ".($max + 1)."\n";
+        $pdf .= "0000000000 65535 f \n";
+        for ($i = 1; $i <= $max; $i++) {
+            $off = $offsets[$i] ?? 0;
+            $pdf .= sprintf("%010d 00000 n \n", $off);
+        }
+        $pdf .= "trailer << /Size ".($max + 1)." /Root 1 0 R >>\nstartxref\n{$xref}\n%%EOF";
+        return $pdf;
     }
 
     private function cheatSheetFormHtml(array $booking): string
