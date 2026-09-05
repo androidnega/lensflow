@@ -360,10 +360,10 @@ SQL;
             'sms_arkesel_api_key' => (string)(($this->config['sms']['arkesel_api_key'] ?? null) ?: ($this->config['sms']['api_key'] ?? '')),
             'sms_moolre_vas_key' => (string)($this->config['sms']['moolre_vas_key'] ?? ''),
             'sms_unit_cost' => '0.04',
-            'home_headline' => 'Moments that last.',
-            'home_title' => 'Book your next shoot in minutes.',
-            'home_lead' => 'Wedding, baby & studio packages — pay with MoMo and follow everything in one place.',
-            'home_cta' => 'View packages',
+            'home_headline' => 'Beauty, held still.',
+            'home_title' => 'Weddings, portraits, and days worth keeping.',
+            'home_lead' => 'Book a session in minutes. Pay with MoMo. Follow every step in one quiet place.',
+            'home_cta' => 'Explore packages',
             'cat_wedding_label' => 'Wedding & Engagement',
             'cat_wedding_short' => 'Wedding',
             'cat_wedding_blurb' => 'Coverage for weddings, engagements and celebrations.',
@@ -383,6 +383,19 @@ SQL;
         ];
         $stmt = $this->db->prepare("INSERT OR IGNORE INTO settings (key,value) VALUES (?,?)");
         foreach ($defaults as $k => $v) $stmt->execute([$k,$v]);
+        $copyRefresh = [
+            'home_headline' => ['Moments that last.', 'Beauty, held still.'],
+            'home_title' => ['Book your next shoot in minutes.', 'Weddings, portraits, and days worth keeping.'],
+            'home_lead' => [
+                'Wedding, baby & studio packages — pay with MoMo and follow everything in one place.',
+                'Book a session in minutes. Pay with MoMo. Follow every step in one quiet place.',
+            ],
+            'home_cta' => ['View packages', 'Explore packages'],
+        ];
+        $refreshStmt = $this->db->prepare("INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+        foreach ($copyRefresh as $key => [$old, $new]) {
+            if ($this->setting($key) === $old) $refreshStmt->execute([$key, $new]);
+        }
         // Rename legacy brands to iBuk.online once
         $legacy = ['Mhannuellens', 'LensFlow', 'Mhannuellens Studio'];
         $app = $this->setting('app_name');
@@ -446,16 +459,25 @@ SQL;
 
     private function seedHomeSlides(): void
     {
-        $count = (int)$this->db->query("SELECT COUNT(*) FROM home_slides")->fetchColumn();
-        if ($count > 0) return;
         $dir = __DIR__.'/../assets/slides';
         if (!is_dir($dir)) mkdir($dir, 0775, true);
         $now = $this->now();
         $seeds = [
-            ['look-01.jpg', 'Portrait look'],
-            ['look-02.jpg', 'Couple look'],
-            ['look-03.jpg', 'Wedding look'],
+            ['couple-embrace.jpg', 'Garden embrace'],
+            ['bridal-lilies.jpg', 'Bridal lilies'],
+            ['couple-celebration.jpg', 'Wedding portrait'],
+            ['bridal-couture.jpg', 'Couture portrait'],
+            ['studio-blue.jpg', 'Studio portrait'],
+            ['bridal-garden.jpg', 'Garden portrait'],
+            ['couple-venue.jpg', 'Venue portrait'],
         ];
+        $legacy = ['look-01.jpg', 'look-02.jpg', 'look-03.jpg', 'couple.jpg', 'bridal-party.jpg'];
+        $existing = $this->db->query("SELECT stored_name FROM home_slides")->fetchAll(PDO::FETCH_COLUMN);
+        $onlyLegacy = $existing !== [] && array_diff($existing, $legacy) === [];
+        if ($existing !== [] && !$onlyLegacy) return;
+        if ($onlyLegacy) {
+            $this->db->exec("DELETE FROM home_slides");
+        }
         $stmt = $this->db->prepare("INSERT INTO home_slides (stored_name,original_name,sort_order,active,created_at) VALUES (?,?,?,1,?)");
         foreach ($seeds as $i => [$file, $label]) {
             if (!is_file($dir.'/'.$file)) continue;
@@ -481,6 +503,26 @@ SQL;
     private function homeSlides(): array
     {
         return $this->db->query("SELECT * FROM home_slides WHERE active=1 ORDER BY sort_order ASC, id ASC")->fetchAll();
+    }
+
+    private function homeLookbook(): array
+    {
+        $dir = __DIR__.'/../assets/home';
+        $items = [
+            ['couple-embrace.jpg', 'Bride and groom in a quiet garden'],
+            ['bridal-lilies.jpg', 'Bride with calla lilies'],
+            ['couple-celebration.jpg', 'Wedding portrait of the couple'],
+            ['bridal-couture.jpg', 'Couture bridal portrait'],
+            ['studio-blue.jpg', 'Studio portrait in powder blue'],
+            ['bridal-garden.jpg', 'Outdoor bridal portrait'],
+            ['couple-venue.jpg', 'Bride and groom at the venue'],
+        ];
+        $out = [];
+        foreach ($items as [$file, $alt]) {
+            if (!is_file($dir.'/'.$file)) continue;
+            $out[] = ['file' => $file, 'alt' => $alt, 'src' => $this->url('/assets/home/'.$file)];
+        }
+        return $out;
     }
 
     private function packageCategoryMeta(): array
@@ -534,40 +576,134 @@ SQL;
     {
         $meta = $this->packageCategoryMeta();
         $slides = $this->homeSlides();
+        $lookbook = $this->homeLookbook();
+        $app = htmlspecialchars($this->cfg('app_name', 'iBuk.online'));
+        $headline = htmlspecialchars($this->cfg('home_headline', 'Beauty, held still.'));
+        $support = htmlspecialchars($this->cfg('home_title', 'Weddings, portraits, and days worth keeping.'));
+        $lead = htmlspecialchars($this->cfg('home_lead', 'Book a session in minutes. Pay with MoMo. Follow every step in one quiet place.'));
+        $cta = htmlspecialchars($this->cfg('home_cta', 'Explore packages'));
+
+        $waDigits = preg_replace('/\D+/', '', $this->cfg('whatsapp_number', ''));
+        $waHref = '';
+        if ($waDigits !== '') {
+            if (str_starts_with($waDigits, '0') && strlen($waDigits) === 10) {
+                $waDigits = '233'.substr($waDigits, 1);
+            }
+            $waHref = 'https://wa.me/'.$waDigits;
+        }
+
+        if ($slides === [] && $lookbook !== []) {
+            foreach ($lookbook as $item) {
+                $slides[] = ['stored_name' => $item['file'], 'original_name' => $item['alt']];
+            }
+        }
+
         $slideHtml = '';
         foreach ($slides as $idx => $slide) {
-            $src = htmlspecialchars($this->url('/assets/slides/'.$slide['stored_name']));
+            $name = basename((string)($slide['stored_name'] ?? ''));
+            if ($name === '') continue;
+            $srcPath = is_file(__DIR__.'/../assets/slides/'.$name) ? '/assets/slides/'.$name : '/assets/home/'.$name;
+            $src = htmlspecialchars($this->url($srcPath));
+            $alt = htmlspecialchars((string)($slide['original_name'] ?? 'Studio photograph'));
             $prio = $idx === 0 ? ' fetchpriority="high"' : ' loading="lazy"';
             $active = $idx === 0 ? ' is-active' : '';
-            $slideHtml .= '<figure class="home-slide'.$active.'" data-slide><img src="'.$src.'" alt="" width="720" height="900" decoding="async"'.$prio.'></figure>';
+            $slideHtml .= '<figure class="home-slide'.$active.'" data-slide><img src="'.$src.'" alt="'.$alt.'" width="820" height="1024" decoding="async"'.$prio.'></figure>';
         }
         if ($slideHtml === '') {
             $slideHtml = '<figure class="home-slide is-active" data-slide><div class="home-slide-empty"></div></figure>';
         }
 
-        $links = '';
-        foreach ($meta as $slug => $info) {
-            $links .= '<a class="home-link" href="'.$this->url('/packages/'.$slug).'">'.htmlspecialchars($info['short']).'</a>';
+        $sideA = $lookbook[1] ?? $lookbook[0] ?? null;
+        $sideB = $lookbook[2] ?? $lookbook[0] ?? null;
+        $mosaicSide = '';
+        foreach ([$sideA, $sideB] as $side) {
+            if (!$side) continue;
+            $mosaicSide .= '<figure class="home-mosaic-side"><img src="'.htmlspecialchars($side['src']).'" alt="'.htmlspecialchars($side['alt']).'" width="820" height="1024" loading="lazy" decoding="async"></figure>';
         }
-        $links .= '<a class="home-link" href="'.$this->url('/packages').'">All packages</a>';
 
-        $cta = htmlspecialchars($this->cfg('home_cta', 'View packages'));
+        $frames = '';
+        foreach ($lookbook as $item) {
+            $frames .= '<figure class="home-frame"><img src="'.htmlspecialchars($item['src']).'" alt="'.htmlspecialchars($item['alt']).'" width="820" height="1024" loading="lazy" decoding="async"></figure>';
+        }
+
+        $colImages = [
+            'wedding' => $this->url('/assets/home/couple-venue.jpg'),
+            'baby' => $this->url('/assets/packages/cover-baby.jpg'),
+            'studio' => $this->url('/assets/home/studio-blue.jpg'),
+        ];
+        $collections = '';
+        foreach ($meta as $slug => $info) {
+            $img = $colImages[$slug] ?? ($lookbook[0]['src'] ?? '');
+            $collections .= '<a class="home-collection" href="'.$this->url('/packages/'.$slug).'">
+              <span class="home-collection-media"><img src="'.htmlspecialchars($img).'" alt="" width="820" height="1024" loading="lazy" decoding="async"></span>
+              <span class="home-collection-copy">
+                <span class="home-collection-kicker">Sessions</span>
+                <span class="home-collection-title">'.htmlspecialchars($info['label']).'</span>
+                <span class="home-collection-blurb">'.htmlspecialchars($info['blurb']).'</span>
+                <span class="home-collection-go">View packages →</span>
+              </span>
+            </a>';
+        }
+
+        $waBtn = $waHref !== ''
+            ? '<a class="home-cta-ghost" href="'.htmlspecialchars($waHref).'" target="_blank" rel="noopener">WhatsApp</a>'
+            : '';
+
         $body = '
-        <section class="home">
-          <div class="home-media" aria-hidden="true">
-            '.$slideHtml.'
-                </div>
-          <div class="home-veil" aria-hidden="true"></div>
-          <div class="home-copy">
-            <p class="home-kicker">'.htmlspecialchars($this->cfg('app_name', 'iBuk.online')).'</p>
-            <h1 class="home-headline">'.htmlspecialchars($this->cfg('home_headline', 'Moments that last.')).'</h1>
-            <p class="home-support">'.htmlspecialchars($this->cfg('home_title', 'Book your next shoot in minutes.')).'</p>
-            <div class="home-cta-row">
-              <a class="home-cta" href="'.$this->url('/packages').'">'.$cta.'</a>
+        <div class="home-page-inner">
+          <section class="home-hero">
+            <div class="home-hero-copy">
+              <p class="home-kicker">'.$app.' · Accra</p>
+              <h1 class="home-headline">'.$headline.'</h1>
+              <p class="home-support">'.$support.'</p>
+              <p class="home-lead">'.$lead.'</p>
+              <div class="home-cta-row">
+                <a class="home-cta" href="'.$this->url('/packages').'">'.$cta.'</a>
+                '.$waBtn.'
               </div>
-            <nav class="home-links" aria-label="Browse">'.$links.'</nav>
-                </div>
-        </section>
+            </div>
+            <div class="home-hero-stage">
+              <div class="home-mosaic">
+                <div class="home-mosaic-main">'.$slideHtml.'</div>
+                '.$mosaicSide.'
+              </div>
+            </div>
+          </section>
+          <section class="home-section">
+            <div class="home-section-head">
+              <p class="home-kicker">Selected frames</p>
+              <h2 class="home-section-title">A quieter kind of luxury.</h2>
+            </div>
+            <div class="home-frames">'.$frames.'</div>
+          </section>
+          <section class="home-section">
+            <div class="home-section-head">
+              <p class="home-kicker">Book a session</p>
+              <h2 class="home-section-title">Choose how you want to be seen.</h2>
+            </div>
+            <div class="home-collections">'.$collections.'</div>
+          </section>
+          <section class="home-section">
+            <div class="home-section-head">
+              <p class="home-kicker">How it works</p>
+              <h2 class="home-section-title">Booked in minutes.</h2>
+            </div>
+            <ol class="home-steps">
+              <li><span>01</span><h3>Pick a package</h3><p>Wedding, baby or studio — every offer lists what is included.</p></li>
+              <li><span>02</span><h3>Pay with MoMo</h3><p>Send the deposit or pay in parts. Your booking code is the reference.</p></li>
+              <li><span>03</span><h3>Follow along</h3><p>Contract, timeline and soft copies live in your client portal.</p></li>
+            </ol>
+          </section>
+          <section class="home-band">
+            <p class="home-kicker">Ready when you are</p>
+            <h2 class="home-section-title">Let\'s make something you will keep.</h2>
+            <a class="home-cta" href="'.$this->url('/packages').'">'.$cta.'</a>
+          </section>
+          <footer class="home-foot">
+            <p>'.$app.'</p>
+            <p>Photography studio · Accra</p>
+          </footer>
+        </div>
         <script>
         (() => {
           const slides = Array.from(document.querySelectorAll("[data-slide]"));
@@ -578,7 +714,7 @@ SQL;
             slides[i].classList.remove("is-active");
             i = (i + 1) % slides.length;
             slides[i].classList.add("is-active");
-          }, 7000);
+          }, 5600);
         })();
         </script>';
         $this->render('Home', $body, ['home' => true]);
@@ -1859,10 +1995,10 @@ SQL;
 
         <section class="rounded-3xl border border-stone-200 bg-white p-5 space-y-4">
           <div><h2 class="font-black">Homepage copy</h2><p class="mt-1 text-sm text-stone-500">Text on the main landing page. Slides are managed under Homepage.</p></div>
-          '.$this->input('home_headline','Headline','text',$this->cfg('home_headline','Moments that last.'),'Main homepage headline').'
-          '.$this->input('home_title','Supporting title','text',$this->cfg('home_title','Book your next shoot in minutes.'),'Short supporting line').'
-          '.$this->textarea('home_lead','Lead paragraph','Short paragraph under the title',$this->cfg('home_lead','Wedding, baby & studio packages — pay with MoMo and follow everything in one place.'),3,'').'
-          '.$this->input('home_cta','Button label','text',$this->cfg('home_cta','View packages'),'Desktop button text').'
+          '.$this->input('home_headline','Headline','text',$this->cfg('home_headline','Beauty, held still.'),'Main homepage headline').'
+          '.$this->input('home_title','Supporting title','text',$this->cfg('home_title','Weddings, portraits, and days worth keeping.'),'Short supporting line').'
+          '.$this->textarea('home_lead','Lead paragraph','Short paragraph under the title',$this->cfg('home_lead','Book a session in minutes. Pay with MoMo. Follow every step in one quiet place.'),3,'').'
+          '.$this->input('home_cta','Button label','text',$this->cfg('home_cta','Explore packages'),'Homepage button text').'
           <p class="text-xs text-stone-500"><a class="font-bold text-stone-800" href="'.$this->url('/dashboard/slides').'">Manage homepage slides →</a></p>
         </section>
 
@@ -2105,7 +2241,7 @@ SQL;
         if ($slide) {
             $this->db->prepare("DELETE FROM home_slides WHERE id=?")->execute([$id]);
             $file = __DIR__.'/../assets/slides/'.basename($slide['stored_name']);
-            if (is_file($file) && !in_array(basename($slide['stored_name']), ['couple.jpg','bridal-party.jpg'], true)) {
+            if (is_file($file) && !in_array(basename($slide['stored_name']), ['couple.jpg','bridal-party.jpg','look-01.jpg','look-02.jpg','look-03.jpg','bridal-lilies.jpg','bridal-couture.jpg','studio-blue.jpg','bridal-garden.jpg','couple-embrace.jpg','couple-celebration.jpg','couple-venue.jpg'], true)) {
                 @unlink($file);
             }
         }
@@ -2532,15 +2668,15 @@ SQL;
             $cls=$f['type']==='error'?'bg-red-50 border-red-200 text-red-800':'bg-emerald-50 border-emerald-200 text-emerald-800';
             $flashHtml.='<div class="mb-2 rounded-xl border '.$cls.' px-3 py-2 text-sm font-semibold">'.htmlspecialchars($f['message']).'</div>';
         }
-        $nav = $isPortal ? '' : $this->topNav(false);
+        $nav = $isPortal ? '' : $this->topNav($isHome);
         $flashBlock = $flashHtml === '' ? '' : ($isPortal
             ? '<div class="px-3 pt-2">'.$flashHtml.'</div>'
             : '<div class="max-w-6xl mx-auto px-4 pt-4">'.$flashHtml.'</div>');
         $appName=htmlspecialchars($this->cfg('app_name','iBuk.online'));
         $themeColor = '#f7f6f3';
         if ($isHome) {
-            $bodyClass = 'home-lock bg-[#111] text-stone-900 antialiased';
-            $themeColor = '#111111';
+            $bodyClass = 'home-page text-stone-900 antialiased';
+            $themeColor = '#f6f2ec';
         } elseif ($isPortal) {
             $bodyClass = 'portal-app text-stone-900 antialiased';
         } else {
@@ -2549,10 +2685,7 @@ SQL;
         echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="'.$themeColor.'"><title>'.htmlspecialchars($title).' · '.$appName.'</title><link rel="icon" href="'.$this->url('/assets/favicon.svg').'" type="image/svg+xml"><link rel="apple-touch-icon" href="'.$this->url('/assets/favicon.svg').'"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer"><script src="https://cdn.tailwindcss.com"></script><style>
 html{scroll-behavior:smooth}
 body{font-family:"Outfit",ui-sans-serif,system-ui,sans-serif}
-body.home-lock{height:100svh;overflow:hidden}
-@media (min-width:768px){
-  body.home-lock{background:#f4f1ee}
-}
+body.home-page{background:#f6f2ec;min-height:100svh}
 .font-display{font-family:"Fraunces",ui-serif,Georgia,serif}
 .safe-bottom{padding-bottom:env(safe-area-inset-bottom)}
 #site-menu:checked~.site-header-inner .icon-open{display:none}
@@ -2574,133 +2707,91 @@ body:has(#site-menu:checked) main{pointer-events:none}
 }
 
 /* —— Homepage —— */
-.home{
-  position:relative;
-  height:calc(100svh - 3.4rem);
-  overflow:hidden;
-  background:#111;
-  color:#fafaf9;
-}
-.home-media{position:absolute;inset:0;z-index:0}
-.home-slide{position:absolute;inset:0;margin:0;opacity:0;transition:opacity 1.2s ease;z-index:0}
-.home-slide.is-active{opacity:1;z-index:1}
-.home-slide img,.home-slide-empty{
-  width:100%;height:100%;object-fit:cover;object-position:center center;
-  display:block;transform:scale(1);
-  filter:contrast(1.05) saturate(1.04);
-  image-rendering:auto;
-  backface-visibility:hidden;
-  -webkit-backface-visibility:hidden;
-}
-.home-slide.is-active img{animation:home-drift 14s ease-out forwards}
-.home-slide-empty{background:#1c1917}
-.home-veil{
-  position:absolute;inset:0;z-index:2;pointer-events:none;
-  background:linear-gradient(180deg,rgba(12,10,9,.15) 0%,rgba(12,10,9,.2) 42%,rgba(12,10,9,.78) 100%);
-}
-.home-copy{
-  position:relative;z-index:3;
-  height:100%;
-  display:flex;flex-direction:column;justify-content:flex-end;
-  padding:1.35rem 1.35rem calc(1.4rem + env(safe-area-inset-bottom));
-  max-width:34rem;
-  animation:home-rise .7s ease .05s both;
-}
-.home-kicker{
-  margin:0 0 .55rem;
-  font-size:.68rem;font-weight:700;letter-spacing:.22em;text-transform:uppercase;
-  color:rgba(250,250,249,.72);
-}
-.home-headline{
-  margin:0;
-  font-family:"Fraunces",ui-serif,Georgia,serif;
-  font-size:clamp(2.6rem,11vw,3.75rem);
-  font-weight:600;letter-spacing:-.02em;line-height:1.05;
-  color:#fff;
-  text-wrap:balance;
-}
-.home-support{
-  margin:.7rem 0 0;
-  font-size:1rem;font-weight:500;line-height:1.45;
-  color:rgba(250,250,249,.82);
-  max-width:22rem;
-}
-.home-cta-row{margin-top:1.15rem}
-.home-cta{
-  display:inline-flex;align-items:center;justify-content:center;
-  min-height:2.7rem;padding:0 1.25rem;
-  border-radius:999px;background:#fff;color:#0c0a09;
-  font-size:.84rem;font-weight:700;text-decoration:none;
-  transition:transform .15s ease,background .15s ease;
-}
+.home-page-inner{max-width:76rem;margin:0 auto;padding:0 0 calc(2.5rem + env(safe-area-inset-bottom))}
+.home-hero{display:flex;flex-direction:column;gap:1.45rem;padding:1.2rem 1.15rem 2.4rem}
+.home-hero-copy{animation:home-rise .7s ease .05s both}
+.home-kicker{margin:0;font-size:.68rem;font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:#a8a29e}
+.home-headline{margin:.55rem 0 0;font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(2.45rem,8.6vw,5rem);font-weight:600;letter-spacing:-.03em;line-height:1.05;color:#14110f;max-width:8.2ch}
+.home-support{margin:.85rem 0 0;font-size:1.08rem;font-weight:500;line-height:1.45;color:#44403c;max-width:28rem}
+.home-lead{margin:.5rem 0 0;font-size:.95rem;line-height:1.65;color:#78716c;max-width:28rem}
+.home-cta-row{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:1.3rem}
+.home-cta{display:inline-flex;align-items:center;justify-content:center;min-height:2.75rem;padding:0 1.3rem;border-radius:999px;background:#14110f;color:#fafaf9;font-size:.84rem;font-weight:700;text-decoration:none;transition:transform .15s ease,background .15s ease}
+.home-cta:hover{background:#292524}
 .home-cta:active{transform:scale(.98)}
-.home-links{
-  display:flex;flex-wrap:wrap;gap:.55rem .9rem;
-  margin-top:1.15rem;padding-top:1rem;
-  border-top:1px solid rgba(250,250,249,.18);
-}
-.home-link{
-  font-size:.78rem;font-weight:600;letter-spacing:.04em;
-  color:rgba(250,250,249,.78);text-decoration:none;
-  transition:color .2s ease;
-}
-.home-link:hover{color:#fff}
+.home-cta-ghost{display:inline-flex;align-items:center;justify-content:center;min-height:2.75rem;padding:0 1.15rem;border-radius:999px;border:1px solid rgba(28,25,23,.14);color:#44403c;font-size:.84rem;font-weight:650;text-decoration:none;background:transparent}
+.home-cta-ghost:hover{border-color:#14110f;color:#14110f}
+.home-mosaic{display:block}
+.home-mosaic-main{position:relative;overflow:hidden;border-radius:1.35rem;height:min(68svh,32rem);background:#1c1917;box-shadow:0 18px 40px rgba(28,25,23,.1)}
+.home-mosaic-side{display:none;margin:0}
+.home-slide{position:absolute;inset:0;margin:0;opacity:0;transition:opacity 1.1s ease;z-index:0}
+.home-slide.is-active{opacity:1;z-index:1}
+.home-slide img,.home-slide-empty,.home-mosaic-side img,.home-frame img,.home-collection-media img{width:100%;height:100%;object-fit:cover;object-position:center 18%;display:block}
+.home-slide img{transform:scale(1);filter:contrast(1.04) saturate(1.03);backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.home-slide.is-active img{animation:home-drift 16s ease-out forwards}
+.home-slide-empty{background:#1c1917}
+.home-section{padding:0 1.15rem 3.4rem}
+.home-section-head{max-width:34rem;margin:0 0 1.45rem}
+.home-section-title{margin:.4rem 0 0;font-family:"Fraunces",ui-serif,Georgia,serif;font-size:clamp(1.75rem,4vw,2.65rem);font-weight:600;letter-spacing:-.02em;color:#14110f;text-wrap:balance;max-width:16ch}
+.home-frames{display:grid;grid-template-columns:1fr 1fr;gap:.55rem}
+.home-frame{margin:0;overflow:hidden;border-radius:1rem;background:#e7e5e4;aspect-ratio:3/4}
+.home-frame img{transition:transform .7s ease}
+.home-frame:hover img{transform:scale(1.04)}
+.home-frame:first-child{grid-column:1 / -1;aspect-ratio:4/5}
+.home-collections{display:grid;gap:1rem}
+.home-collection{display:flex;flex-direction:column;text-decoration:none;color:inherit;background:#fff;border-radius:1.35rem;overflow:hidden;border:1px solid rgba(28,25,23,.08);transition:transform .2s ease,box-shadow .2s ease}
+.home-collection:hover{transform:translateY(-3px);box-shadow:0 16px 36px rgba(28,25,23,.08)}
+.home-collection-media{display:block;aspect-ratio:3/4;overflow:hidden;background:#e7e5e4}
+.home-collection-copy{display:flex;flex-direction:column;gap:.35rem;padding:1.15rem 1.15rem 1.3rem}
+.home-collection-title{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:1.4rem;font-weight:600;color:#14110f;letter-spacing:-.01em}
+.home-collection-blurb{font-size:.85rem;line-height:1.5;color:#78716c}
+.home-collection-go{margin-top:.4rem;font-size:.78rem;font-weight:700;color:#14110f}
+.home-steps{list-style:none;margin:0;padding:0;display:grid;gap:.25rem}
+.home-steps li{padding:1.15rem 0;border-top:1px solid rgba(28,25,23,.1)}
+.home-steps span{display:block;font-size:.72rem;font-weight:700;letter-spacing:.16em;color:#a8a29e}
+.home-steps h3{margin:.4rem 0 0;font-size:1.12rem;font-weight:700;color:#14110f}
+.home-steps p{margin:.4rem 0 0;font-size:.9rem;line-height:1.55;color:#78716c}
+.home-band{margin:0 1.15rem 2rem;padding:2.4rem 1.4rem;border-radius:1.5rem;background:#14110f;color:#fafaf9;text-align:center}
+.home-band .home-kicker{color:rgba(250,250,249,.45)}
+.home-band .home-section-title{color:#fff;max-width:22rem;margin:.45rem auto 0}
+.home-band .home-cta{background:#fff;color:#14110f;margin-top:1.25rem}
+.home-band .home-cta:hover{background:#f5f5f4}
+.home-foot{padding:0 1.15rem;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;font-size:.78rem;color:#a8a29e}
 @keyframes home-rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
-@keyframes home-drift{from{transform:scale(1)}to{transform:scale(1.03)}}
+@keyframes home-drift{from{transform:scale(1)}to{transform:scale(1.035)}}
 @media (prefers-reduced-motion:reduce){
-  .home-copy,.home-slide img{animation:none!important;opacity:1;transform:none}
+  .home-hero-copy,.home-slide img{animation:none!important;opacity:1;transform:none}
   .home-slide{transition:none}
+  .home-collection{transition:none}
 }
 @media (min-width:768px){
-  .home{
-    display:grid;
-    grid-template-columns:minmax(17rem,24rem) minmax(0,1fr);
-    grid-template-areas:"copy media";
-    align-items:center;
-    background:#f4f1ee;
-    color:#1c1917;
-    max-width:76rem;margin:0 auto;
-    padding:1.25rem 1.35rem 1.35rem;
-    gap:1.75rem;
-  }
-  .home-media{
-    grid-area:media;
-    position:relative;inset:auto;
-    border-radius:1.15rem;overflow:hidden;
-    min-height:0;height:min(68vh,34rem);
-    align-self:center;
-    box-shadow:0 20px 50px rgba(28,25,23,.12);
-  }
-  .home-veil{display:none}
-  .home-copy{
-    grid-area:copy;
-    justify-content:center;
-    padding:1rem .25rem 1rem .75rem;
-    max-width:none;
-    color:#1c1917;
-  }
-  .home-kicker{color:#a8a29e}
-  .home-headline{
-    font-size:clamp(3.25rem,5vw,4.6rem);
-    color:#0c0a09;
-  }
-  .home-support{color:#57534e;font-size:1.05rem;max-width:22rem}
-  .home-cta{background:#0c0a09;color:#fff}
-  .home-cta:hover{background:#292524}
-  .home-links{
-    border-top-color:rgba(28,25,23,.12);
-    margin-top:1.4rem;padding-top:1.1rem;
-  }
-  .home-link{color:#78716c}
-  .home-link:hover{color:#0c0a09}
+  .home-frames{grid-template-columns:repeat(12,1fr);gap:.85rem}
+  .home-frame{border-radius:1.15rem;aspect-ratio:4/5}
+  .home-frame:first-child{grid-column:auto;aspect-ratio:4/5}
+  .home-frame:nth-child(1){grid-column:span 7}
+  .home-frame:nth-child(2){grid-column:span 5}
+  .home-frame:nth-child(3){grid-column:span 4}
+  .home-frame:nth-child(4){grid-column:span 4}
+  .home-frame:nth-child(5){grid-column:span 4}
+  .home-frame:nth-child(6){grid-column:span 5}
+  .home-frame:nth-child(7){grid-column:span 7}
+  .home-collections{grid-template-columns:repeat(3,1fr);gap:1rem}
+  .home-steps{grid-template-columns:repeat(3,1fr);gap:1.25rem}
+  .home-steps li{padding:1.25rem 0 0;border-top:1px solid rgba(28,25,23,.1)}
 }
-@media (min-width:1024px){
-  .home{height:calc(100svh - 4rem);padding:1.5rem 1.75rem 1.75rem;gap:2rem}
-  .home-media{height:min(66vh,36rem)}
+@media (min-width:900px){
+  .home-hero{display:grid;grid-template-columns:minmax(18rem,.9fr) minmax(0,1.28fr);align-items:center;gap:2.15rem;padding:1.4rem 1.75rem 2.6rem}
+  .home-headline{font-size:clamp(3.3rem,5.2vw,5rem)}
+  .home-mosaic{display:grid;grid-template-columns:1.38fr .72fr;grid-template-rows:1fr 1fr;gap:.7rem;height:min(78vh,40.5rem)}
+  .home-mosaic-main{grid-row:1 / span 2;height:100%;border-radius:1.5rem}
+  .home-mosaic-side{display:block;overflow:hidden;border-radius:1.15rem;min-height:0;background:#e7e5e4}
+  .home-section,.home-band,.home-foot{padding-left:1.75rem;padding-right:1.75rem}
+  .home-band{margin-left:1.75rem;margin-right:1.75rem;padding:3rem 2rem}
 }
 
 .site-header{position:sticky;top:0;z-index:140;isolation:isolate;border-bottom:1px solid rgba(231,229,228,.9);background:#fff}
 .site-header-inner{position:relative;z-index:150;max-width:72rem;margin:0 auto;padding:0 1rem;display:flex;align-items:center;justify-content:space-between;gap:.75rem;height:3.4rem;background:#fff}
+.site-header-home{background:#f6f2ec;border-bottom-color:rgba(28,25,23,.06)}
+.site-header-home .site-header-inner{background:#f6f2ec}
 .site-brand{display:flex;align-items:center;gap:.65rem;min-width:0;text-decoration:none;color:#1c1917}
 .site-brand-mark{display:none}
 .site-brand-name{font-family:"Fraunces",ui-serif,Georgia,serif;font-size:1.35rem;font-weight:600;letter-spacing:-.01em;line-height:1}
@@ -2767,7 +2858,7 @@ body.portal-app{min-height:100svh;background:#f3f1ee}
 /* Compact public package cards */
 .offer-card{display:flex;flex-direction:column;border:1px solid #e7e5e4;background:#fff;border-radius:1.25rem;overflow:hidden;box-shadow:0 8px 24px rgba(28,25,23,.04)}
 .offer-media{display:block;aspect-ratio:3/2;overflow:hidden;background:#e7e5e4}
-.offer-media img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .45s ease}
+.offer-media img{width:100%;height:100%;object-fit:cover;object-position:center 18%;display:block;transition:transform .45s ease}
 .offer-card:hover .offer-media img{transform:scale(1.03)}
 .offer-body{padding:.95rem 1rem 1.05rem;display:flex;flex-direction:column;gap:.45rem;flex:1}
 .offer-top{display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem}
@@ -2783,7 +2874,7 @@ body.portal-app{min-height:100svh;background:#f3f1ee}
 .offer-more i{font-size:.65rem}
 .offer-book{display:inline-flex;align-items:center;justify-content:center;min-height:2.1rem;padding:0 .9rem;border-radius:999px;background:#1c1917;color:#fff;font-size:.75rem;font-weight:800;text-decoration:none}
 .offer-detail-media{border-radius:1.35rem;overflow:hidden;border:1px solid #e7e5e4;background:#e7e5e4;aspect-ratio:3/2}
-.offer-detail-media img{width:100%;height:100%;object-fit:cover;display:block}
+.offer-detail-media img{width:100%;height:100%;object-fit:cover;object-position:center 18%;display:block}
 .offer-detail-list{list-style:none;margin:0;padding:0;display:grid;gap:.65rem}
 .offer-detail-list li{display:flex;gap:.65rem;align-items:flex-start;font-size:.92rem;line-height:1.45;color:#44403c}
 .offer-detail-list i{margin-top:.2rem;color:#1c1917;font-size:.75rem}
@@ -2801,7 +2892,6 @@ body.portal-app{min-height:100svh;background:#f3f1ee}
 
     private function topNav(bool $home = false): string
     {
-        unset($home);
         $name=htmlspecialchars($this->cfg('app_name','iBuk.online'));
         $homeUrl=$this->url('/');
         $wedding=$this->url('/packages/wedding');
@@ -2823,7 +2913,7 @@ body.portal-app{min-height:100svh;background:#f3f1ee}
             return '<a href="'.$href.'" class="mobile-nav-link"><span>'.$label.'</span><span class="mobile-nav-meta">'.$meta.'</span></a>';
         };
 
-        return '<header class="site-header">
+        return '<header class="site-header'.($home ? ' site-header-home' : '').'">
           <input type="checkbox" id="site-menu" class="sr-only" aria-hidden="true">
           <div class="site-header-inner">
             <a href="'.$homeUrl.'" class="site-brand">
