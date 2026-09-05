@@ -3358,7 +3358,6 @@ TEXT;
     /** @return array{provider:string,status:string,response:string} */
     private function sendSms(string $phone, string $message): array
     {
-        $provider = $this->smsProvider();
         $sender = $this->smsSenderId();
         $to = $this->smsPhone($phone);
         $segments = max(1, (int)ceil(mb_strlen($message) / 160));
@@ -3366,55 +3365,32 @@ TEXT;
         $cost = round($segments * $unit, 4);
         $status = 'logged';
         $response = '';
+        $provider = 'log';
+        $attempts = [];
 
-        if ($provider === 'arkesel') {
-            $key = $this->cfg('sms_arkesel_api_key', '');
-            if ($key === '') {
-                $status = 'error';
-                $response = 'Missing Arkesel API key';
-            } else {
-                $res = $this->httpJson(
-                    'POST',
-                    'https://sms.arkesel.com/api/v2/sms/send',
-                    [
-                        'sender' => $sender,
-                        'message' => $message,
-                        'recipients' => [$to],
-                        'callback_url' => $this->url('/sms/dlr'),
-                    ],
-                    ['api-key: '.$key, 'Content-Type: application/json']
-                );
-                $response = $res['raw'];
-                $ok = ($res['code'] >= 200 && $res['code'] < 300)
-                    && (empty($res['json']['status']) || in_array(strtolower((string)$res['json']['status']), ['success', 'ok'], true) || (string)($res['json']['status'] ?? '') === 'success');
-                // Arkesel often returns status "success" as string
-                if (isset($res['json']['status']) && strtolower((string)$res['json']['status']) === 'success') $ok = true;
-                if (isset($res['json']['code']) && (string)$res['json']['code'] === '1000') $ok = true;
-                $status = $ok ? 'sent' : 'error';
+        foreach ($this->smsProviderChain() as $candidate) {
+            if ($candidate === 'log') {
+                $provider = 'log';
+                $status = 'logged';
+                $response = 'Log provider active';
+                break;
             }
-        } elseif ($provider === 'moolre') {
-            $key = $this->cfg('sms_moolre_vas_key', '');
-            if ($key === '') {
-                $status = 'error';
-                $response = 'Missing Moolre VAS key';
-            } else {
-                $res = $this->httpJson(
-                    'POST',
-                    'https://api.moolre.com/open/sms/send',
-                    [
-                        'type' => 1,
-                        'senderid' => $sender,
-                        'messages' => [['recipient' => $to, 'message' => $message]],
-                    ],
-                    ['X-API-VASKEY: '.$key, 'Content-Type: application/json']
-                );
-                $response = $res['raw'];
-                $code = (string)($res['json']['code'] ?? $res['json']['status'] ?? '');
-                $ok = $res['code'] >= 200 && $res['code'] < 300 && ($code === '' || $code === '1' || strtolower($code) === 'success' || $code === '200');
-                if (isset($res['json']['status']) && (int)$res['json']['status'] === 1) $ok = true;
-                $status = $ok ? 'sent' : 'error';
+            $attempt = $candidate === 'moolre'
+                ? $this->sendViaMoolre($to, $message, $sender)
+                : $this->sendViaArkesel($to, $message, $sender);
+            $attempts[] = strtoupper($candidate).': '.$attempt['response'];
+            if ($attempt['status'] === 'sent') {
+                $provider = $candidate;
+                $status = 'sent';
+                $response = $attempt['response'];
+                break;
             }
-        } else {
+            $provider = $candidate;
+            $status = 'error';
+            $response = $attempt['response'];
+        }
+
+        if ($provider === 'log') {
             // Optional legacy webhook from config.php
             $sms = $this->config['sms'] ?? [];
             if (($sms['driver'] ?? '') === 'webhook' && !empty($sms['webhook_url'])) {
@@ -3434,6 +3410,9 @@ TEXT;
             $line = '['.$this->now().'] '.$to.' | '.$message.PHP_EOL;
             @file_put_contents(__DIR__.'/../storage/logs/sms.log', $line, FILE_APPEND);
         }
+        if ($status === 'error' && count($attempts) > 1) {
+            $response = implode("\n\nFallback chain:\n", [array_shift($attempts), implode("\n", $attempts)]);
+        }
 
         try {
             $this->db->prepare("INSERT INTO sms_log (provider,phone,message,status,segments,cost,response,created_at) VALUES (?,?,?,?,?,?,?,?)")
@@ -3448,7 +3427,33 @@ TEXT;
     {
         $p = strtolower($this->cfg('sms_provider', (string)($this->config['sms']['driver'] ?? 'log')));
         if ($p === 'webhook') $p = 'log';
-        return in_array($p, ['log', 'arkesel', 'moolre'], true) ? $p : 'log';
+        $preferred = in_array($p, ['log', 'arkesel', 'moolre'], true) ? $p : 'log';
+        $chain = $this->smsProviderChain();
+        return $chain[0] ?? $preferred;
+    }
+
+    /** @return string[] */
+    private function smsProviderChain(): array
+    {
+        $preferred = strtolower($this->cfg('sms_provider', (string)($this->config['sms']['driver'] ?? 'log')));
+        if ($preferred === 'webhook') $preferred = 'log';
+        if ($preferred === 'log') return ['log'];
+
+        $chain = [];
+        if ($this->smsProviderReady('moolre')) $chain[] = 'moolre';
+        if ($this->smsProviderReady('arkesel')) $chain[] = 'arkesel';
+        if ($chain) return $chain;
+
+        return [in_array($preferred, ['arkesel', 'moolre'], true) ? $preferred : 'log'];
+    }
+
+    private function smsProviderReady(string $provider): bool
+    {
+        return match ($provider) {
+            'moolre' => trim($this->cfg('sms_moolre_vas_key', '')) !== '',
+            'arkesel' => trim($this->cfg('sms_arkesel_api_key', '')) !== '',
+            default => false,
+        };
     }
 
     private function smsSenderId(): string
@@ -3467,6 +3472,56 @@ TEXT;
         if (str_starts_with($digits, '0') && strlen($digits) === 10) return '233'.substr($digits, 1);
         if (strlen($digits) === 9) return '233'.$digits;
         return $digits !== '' ? $digits : $phone;
+    }
+
+    /** @return array{status:string,response:string} */
+    private function sendViaArkesel(string $to, string $message, string $sender): array
+    {
+        $key = $this->cfg('sms_arkesel_api_key', '');
+        if ($key === '') {
+            return ['status' => 'error', 'response' => 'Missing Arkesel API key'];
+        }
+        $res = $this->httpJson(
+            'POST',
+            'https://sms.arkesel.com/api/v2/sms/send',
+            [
+                'sender' => $sender,
+                'message' => $message,
+                'recipients' => [$to],
+                'callback_url' => $this->url('/sms/dlr'),
+            ],
+            ['api-key: '.$key, 'Content-Type: application/json']
+        );
+        $response = $res['raw'];
+        $ok = ($res['code'] >= 200 && $res['code'] < 300)
+            && (empty($res['json']['status']) || in_array(strtolower((string)$res['json']['status']), ['success', 'ok'], true) || (string)($res['json']['status'] ?? '') === 'success');
+        if (isset($res['json']['status']) && strtolower((string)$res['json']['status']) === 'success') $ok = true;
+        if (isset($res['json']['code']) && (string)$res['json']['code'] === '1000') $ok = true;
+        return ['status' => $ok ? 'sent' : 'error', 'response' => $response];
+    }
+
+    /** @return array{status:string,response:string} */
+    private function sendViaMoolre(string $to, string $message, string $sender): array
+    {
+        $key = $this->cfg('sms_moolre_vas_key', '');
+        if ($key === '') {
+            return ['status' => 'error', 'response' => 'Missing Moolre VAS key'];
+        }
+        $res = $this->httpJson(
+            'POST',
+            'https://api.moolre.com/open/sms/send',
+            [
+                'type' => 1,
+                'senderid' => $sender,
+                'messages' => [['recipient' => $to, 'message' => $message]],
+            ],
+            ['X-API-VASKEY: '.$key, 'Content-Type: application/json']
+        );
+        $response = $res['raw'];
+        $code = (string)($res['json']['code'] ?? $res['json']['status'] ?? '');
+        $ok = $res['code'] >= 200 && $res['code'] < 300 && ($code === '' || $code === '1' || strtolower($code) === 'success' || $code === '200');
+        if (isset($res['json']['status']) && (int)$res['json']['status'] === 1) $ok = true;
+        return ['status' => $ok ? 'sent' : 'error', 'response' => $response];
     }
 
     /** @return array{code:int,json:array,raw:string} */
@@ -3548,14 +3603,31 @@ TEXT;
         $stmt=$this->db->prepare("SELECT value FROM settings WHERE key=?");$stmt->execute([$key]);return (string)($stmt->fetchColumn()?:'');
     }
 
+    private function env(string $key): string
+    {
+        $value = getenv($key);
+        if ($value !== false && trim((string)$value) !== '') return trim((string)$value);
+        $server = $_SERVER[$key] ?? null;
+        if (is_string($server) && trim($server) !== '') return trim($server);
+        $env = $_ENV[$key] ?? null;
+        if (is_string($env) && trim($env) !== '') return trim($env);
+        return '';
+    }
+
     private function cfg(string $key, string $default = ''): string
     {
-        $configSmsDriver = strtolower(trim((string)($this->config['sms']['driver'] ?? '')));
-        $configArkeselKey = trim((string)((($this->config['sms']['arkesel_api_key'] ?? null) ?: ($this->config['sms']['api_key'] ?? ''))));
-        $configMoolreKey = trim((string)($this->config['sms']['moolre_vas_key'] ?? ''));
-        $configSmsOverride = ($configSmsDriver === 'arkesel' && $configArkeselKey !== '')
-            || ($configSmsDriver === 'moolre' && $configMoolreKey !== '');
-        $map = [
+        $envMap = [
+            'sms_sender' => $this->env('SMS_SENDER') ?: $this->env('MOOLRE_SENDER') ?: $this->env('ARKESEL_SENDER'),
+            'sms_provider' => $this->env('SMS_PROVIDER') ?: $this->env('SMS_DRIVER'),
+            'sms_arkesel_api_key' => $this->env('SMS_ARKESEL_API_KEY') ?: $this->env('ARKESEL_API_KEY') ?: $this->env('ARKESEL_KEY'),
+            'sms_moolre_vas_key' => $this->env('SMS_MOOLRE_VAS_KEY') ?: $this->env('MOOLRE_VAS_KEY') ?: $this->env('MOOLRE_API_KEY'),
+        ];
+        if (array_key_exists($key, $envMap) && $envMap[$key] !== '') {
+            return (string)$envMap[$key];
+        }
+        $fromDb = $this->setting($key);
+        if ($fromDb !== '') return $fromDb;
+        $configMap = [
             'app_name' => $this->config['app_name'] ?? null,
             'photographer_name' => $this->config['photographer_name'] ?? null,
             'momo_number' => $this->config['momo_number'] ?? null,
@@ -3567,14 +3639,8 @@ TEXT;
             'sms_arkesel_api_key' => ($this->config['sms']['arkesel_api_key'] ?? null) ?: ($this->config['sms']['api_key'] ?? null),
             'sms_moolre_vas_key' => $this->config['sms']['moolre_vas_key'] ?? null,
         ];
-        if ($configSmsOverride && in_array($key, ['sms_sender', 'sms_provider', 'sms_arkesel_api_key', 'sms_moolre_vas_key'], true)
-            && array_key_exists($key, $map) && $map[$key] !== null && $map[$key] !== '') {
-            return (string)$map[$key];
-        }
-        $fromDb = $this->setting($key);
-        if ($fromDb !== '') return $fromDb;
-        if (array_key_exists($key, $map) && $map[$key] !== null && $map[$key] !== '') {
-            return (string)$map[$key];
+        if (array_key_exists($key, $configMap) && $configMap[$key] !== null && $configMap[$key] !== '') {
+            return (string)$configMap[$key];
         }
         return $default;
     }

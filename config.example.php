@@ -22,10 +22,11 @@ return [
         'path' => __DIR__ . '/storage/database.sqlite',
     ],
 
-    // SMS: values here override dashboard SMS settings when set.
-    // Use driver: log | arkesel | moolre
+    // SMS fallback order is Moolre first, then Arkesel when both keys exist.
+    // Keys can come from dashboard Settings, these config values, or env vars:
+    // SMS_PROVIDER, SMS_SENDER, SMS_MOOLRE_VAS_KEY, SMS_ARKESEL_API_KEY.
     'sms' => [
-        'driver' => 'log',
+        'driver' => 'moolre',
         'webhook_url' => '',
         'api_key' => '',
         'arkesel_api_key' => '',
