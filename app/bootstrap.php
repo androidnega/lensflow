@@ -1528,7 +1528,7 @@ SQL;
 
         $cards = '';
         foreach ($packages as $package) {
-            $cards .= '<div class="rounded-3xl border border-stone-200 bg-white p-4"><div class="flex items-start gap-4"><img src="'.htmlspecialchars($this->packageCoverUrl($package)).'" alt="" class="h-20 w-20 rounded-2xl object-cover shrink-0"><div class="min-w-0 flex-1"><p class="text-lg font-black text-stone-950">'.htmlspecialchars((string)$package['name']).'</p><p class="mt-1 text-sm text-stone-500">'.htmlspecialchars((string)$package['description']).'</p><div class="mt-3 flex flex-wrap gap-2"><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.$this->money((float)$package['price']).'</span><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.htmlspecialchars($this->packageCoverageLabel($package)).'</span></div><a href="'.$this->url('/client/new-booking?kind='.$kind.'&book='.(int)$package['id'].'#book').'" class="mt-4 inline-flex rounded-full bg-stone-950 px-4 py-2 text-sm font-bold text-white">Continue</a></div></div></div>';
+            $cards .= '<div class="rounded-3xl border border-stone-200 bg-white p-4"><div class="flex items-start gap-4"><img src="'.htmlspecialchars($this->packageCoverUrl($package)).'" alt="" class="h-20 w-20 rounded-2xl object-cover shrink-0" style="object-position:center 10%;"><div class="min-w-0 flex-1"><p class="text-lg font-black text-stone-950">'.htmlspecialchars((string)$package['name']).'</p><p class="mt-1 text-sm text-stone-500">'.htmlspecialchars((string)$package['description']).'</p><div class="mt-3 flex flex-wrap gap-2"><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.$this->money((float)$package['price']).'</span><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.htmlspecialchars($this->packageCoverageLabel($package)).'</span></div><a href="'.$this->url('/client/new-booking?kind='.$kind.'&book='.(int)$package['id'].'#book').'" class="mt-4 inline-flex rounded-full bg-stone-950 px-4 py-2 text-sm font-bold text-white">Continue</a></div></div></div>';
         }
         if ($cards === '') {
             $cards = $this->emptyState('No packages yet', 'No active packages are available for this booking type right now.');
@@ -1541,7 +1541,7 @@ SQL;
             $pick->execute([$bookId, $selected['category']]);
             $package = $pick->fetch();
             if ($package) {
-                $selectedCard = '<div class="rounded-3xl border border-stone-200 bg-white p-5"><p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">Step 3</p><h2 class="mt-2 text-2xl font-black text-stone-950">Finish your booking</h2><div class="mt-4 flex items-start gap-4"><img src="'.htmlspecialchars($this->packageCoverUrl($package)).'" alt="" class="h-24 w-24 rounded-2xl object-cover shrink-0"><div><p class="text-lg font-black text-stone-950">'.htmlspecialchars((string)$package['name']).'</p><p class="mt-1 text-sm text-stone-500">'.htmlspecialchars((string)$package['description']).'</p><div class="mt-3 flex flex-wrap gap-2"><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.$this->money((float)$package['price']).'</span><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.htmlspecialchars($this->packageCoverageLabel($package)).'</span></div></div></div></div>';
+                $selectedCard = '<div class="rounded-3xl border border-stone-200 bg-white p-5"><p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">Step 3</p><h2 class="mt-2 text-2xl font-black text-stone-950">Finish your booking</h2><div class="mt-4 flex items-start gap-4"><img src="'.htmlspecialchars($this->packageCoverUrl($package)).'" alt="" class="h-24 w-24 rounded-2xl object-cover shrink-0" style="object-position:center 10%;"><div><p class="text-lg font-black text-stone-950">'.htmlspecialchars((string)$package['name']).'</p><p class="mt-1 text-sm text-stone-500">'.htmlspecialchars((string)$package['description']).'</p><div class="mt-3 flex flex-wrap gap-2"><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.$this->money((float)$package['price']).'</span><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.htmlspecialchars($this->packageCoverageLabel($package)).'</span></div></div></div></div>';
                 $form = '<div class="mt-5">'.$this->bookingForm($package, [
                     'portal' => true,
                     'fixed_event_type' => $selected['event_type'],
@@ -3114,7 +3114,7 @@ body.portal-app{min-height:100svh;background:#f3f1ee}
 /* Compact public package cards */
 .offer-card{display:flex;flex-direction:column;border:1px solid #e7e5e4;background:#fff;border-radius:1.25rem;overflow:hidden;box-shadow:0 8px 24px rgba(28,25,23,.04)}
 .offer-media{display:block;aspect-ratio:3/2;overflow:hidden;background:#e7e5e4}
-.offer-media img{width:100%;height:100%;object-fit:cover;object-position:center 18%;display:block;transition:transform .45s ease}
+.offer-media img{width:100%;height:100%;object-fit:cover;object-position:center 10%;display:block;transition:transform .45s ease}
 .offer-card:hover .offer-media img{transform:scale(1.03)}
 .offer-body{padding:.95rem 1rem 1.05rem;display:flex;flex-direction:column;gap:.45rem;flex:1}
 .offer-top{display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem}
@@ -3130,7 +3130,7 @@ body.portal-app{min-height:100svh;background:#f3f1ee}
 .offer-more i{font-size:.65rem}
 .offer-book{display:inline-flex;align-items:center;justify-content:center;min-height:2.1rem;padding:0 .9rem;border-radius:999px;background:#1c1917;color:#fff;font-size:.75rem;font-weight:800;text-decoration:none}
 .offer-detail-media{border-radius:1.35rem;overflow:hidden;border:1px solid #e7e5e4;background:#e7e5e4;aspect-ratio:3/2}
-.offer-detail-media img{width:100%;height:100%;object-fit:cover;object-position:center 18%;display:block}
+.offer-detail-media img{width:100%;height:100%;object-fit:cover;object-position:center 10%;display:block}
 .offer-detail-list{list-style:none;margin:0;padding:0;display:grid;gap:.65rem}
 .offer-detail-list li{display:flex;gap:.65rem;align-items:flex-start;font-size:.92rem;line-height:1.45;color:#44403c}
 .offer-detail-list i{margin-top:.2rem;color:#1c1917;font-size:.75rem}
