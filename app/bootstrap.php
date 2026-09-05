@@ -1312,9 +1312,11 @@ SQL;
             [$this->cfg('app_name', 'iBuk.online'), $otp],
             $this->cfg('otp_sms_template', 'Your {app} code is {otp}. It expires in 10 minutes.')
         );
-        $this->sendSms($phone, $otpMsg);
-        if ($this->smsProvider() === 'log') {
+        $smsResult = $this->sendSms($phone, $otpMsg);
+        if ($smsResult['provider'] === 'log') {
             $this->flash('success','OTP sent. For local testing, use code '.$otp.'.');
+        } elseif ($smsResult['status'] !== 'sent') {
+            $this->flash('error', 'SMS could not be sent right now. Check your SMS provider, API key, sender ID, and balance in Settings.');
         } else {
             $this->flash('success','OTP sent to your phone. Enter it to continue.');
         }
@@ -3141,7 +3143,8 @@ TEXT;
         return (int)$stmt->fetchColumn();
     }
 
-    private function sendSms(string $phone, string $message): void
+    /** @return array{provider:string,status:string,response:string} */
+    private function sendSms(string $phone, string $message): array
     {
         $provider = $this->smsProvider();
         $sender = $this->cfg('sms_sender', 'iBuk');
@@ -3221,6 +3224,7 @@ TEXT;
         } catch (Throwable $e) {
             // ignore log failures
         }
+        return ['provider' => $provider, 'status' => $status, 'response' => $response];
     }
 
     private function smsProvider(): string
@@ -3254,8 +3258,12 @@ TEXT;
         }
         curl_setopt_array($ch, $opts);
         $raw = (string)@curl_exec($ch);
+        $curlError = (string)curl_error($ch);
         $code = (int)@curl_getinfo($ch, CURLINFO_HTTP_CODE);
         @curl_close($ch);
+        if ($raw === '' && $curlError !== '') {
+            $raw = $curlError;
+        }
         $json = json_decode($raw, true);
         return ['code' => $code, 'json' => is_array($json) ? $json : [], 'raw' => $raw];
     }
