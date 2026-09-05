@@ -1904,7 +1904,9 @@ SQL;
         $baby = (int)$this->db->query("SELECT COUNT(*) FROM bookings b JOIN packages p ON p.id=b.package_id WHERE p.category='baby'")->fetchColumn();
         $studio = (int)$this->db->query("SELECT COUNT(*) FROM bookings b JOIN packages p ON p.id=b.package_id WHERE p.category='studio'")->fetchColumn();
         $smsSpent = (float)$this->db->query("SELECT COALESCE(SUM(cost),0) FROM sms_log")->fetchColumn();
-        $smsSent = (int)$this->db->query("SELECT COUNT(*) FROM sms_log")->fetchColumn();
+        $smsAccepted = (int)$this->db->query("SELECT COUNT(*) FROM sms_log WHERE status IN ('sent','delivered')")->fetchColumn();
+        $smsDelivered = (int)$this->db->query("SELECT COUNT(*) FROM sms_log WHERE status='delivered'")->fetchColumn();
+        $smsFailed = (int)$this->db->query("SELECT COUNT(*) FROM sms_log WHERE status IN ('error','logged')")->fetchColumn();
         $smsBalance = $this->fetchSmsBalance();
         $balanceLabel = $smsBalance['ok']
             ? htmlspecialchars($smsBalance['label'])
@@ -1960,9 +1962,9 @@ SQL;
               '.$this->stat('Clients',(string)$clients,'fa-solid fa-users').'
               '.$this->stat('SMS left',$balanceLabel,'fa-solid fa-comment-sms').'
               '.$this->stat('SMS spent',$this->money($smsSpent),'fa-solid fa-money-bill-wave').'
-              '.$this->stat('SMS sent',(string)$smsSent,'fa-solid fa-paper-plane').'
+              '.$this->stat('SMS delivered',(string)$smsDelivered,'fa-solid fa-paper-plane').'
             </div>
-            <p class="mt-2 text-xs text-stone-500">'.$balanceHint.' · Provider: '.htmlspecialchars($this->smsProvider()).'</p>
+            <p class="mt-2 text-xs text-stone-500">'.$balanceHint.' · Provider: '.htmlspecialchars($this->smsProvider()).' · Accepted: '.$smsAccepted.' · Failed/logged: '.$smsFailed.'</p>
 
             <div class="mt-6 grid lg:grid-cols-3 gap-4">
               <div class="rounded-3xl border border-stone-200 bg-white p-5 lg:col-span-2">
