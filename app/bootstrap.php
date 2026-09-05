@@ -1008,18 +1008,16 @@ SQL;
     private function packageTagList(array $p): string
     {
         $tags = [];
-        $days = (int)($p['turnaround_days'] ?? 0);
-        if ($days > 0) $tags[] = $days.' days';
-
-        $blob = strtolower(trim((string)($p['deliverables'] ?? '').' '.(string)($p['description'] ?? '')));
-        if (str_contains($blob, 'engagement only')) {
-            $tags[] = 'Engagement only';
-        } elseif (str_contains($blob, 'wedding & engagement')) {
-            $tags[] = 'Wedding & engagement';
-        } elseif (str_contains($blob, 'wedding')) {
-            $tags[] = 'Wedding coverage';
+        $category = (string)($p['category'] ?? '');
+        $coverage = $this->packageCoverageLabel($p);
+        if ($coverage !== '') {
+            $tags[] = $coverage;
+        } elseif ($category !== 'wedding') {
+            $days = (int)($p['turnaround_days'] ?? 0);
+            if ($days > 0) $tags[] = $days.' days';
         }
 
+        $blob = strtolower(trim((string)($p['deliverables'] ?? '').' '.(string)($p['description'] ?? '')));
         if (str_contains($blob, 'no video')) {
             $tags[] = 'Photos only';
         } elseif (str_contains($blob, 'video')) {
@@ -1038,6 +1036,22 @@ SQL;
             $html .= '<li>'.htmlspecialchars($tag).'</li>';
         }
         return $html;
+    }
+
+    private function packageCoverageLabel(array $p): string
+    {
+        $category = (string)($p['category'] ?? '');
+        $blob = strtolower(trim((string)($p['deliverables'] ?? '').' '.(string)($p['description'] ?? '')));
+        if ($category === 'wedding') {
+            if (str_contains($blob, 'engagement only')) return 'Engagement only';
+            if (str_contains($blob, 'wedding & engagement') || (str_contains($blob, 'wedding and engagement'))) {
+                return 'Same day or 2 separate days';
+            }
+            if (str_contains($blob, 'wedding')) return 'Wedding only';
+            return 'Wedding booking';
+        }
+        $days = (int)($p['turnaround_days'] ?? 0);
+        return $days > 0 ? $days.' days' : '';
     }
 
     private function bookingAddonCatalog(string $category): array
@@ -1107,6 +1121,25 @@ SQL;
             $html .= '<span class="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700">'.htmlspecialchars($tag).'</span>';
         }
         return $html;
+    }
+
+    private function clientBookingProgress(int $step): string
+    {
+        $steps = [
+            1 => ['label' => 'Type'],
+            2 => ['label' => 'Package'],
+            3 => ['label' => 'Details'],
+        ];
+        $html = '<div class="rounded-3xl border border-stone-200 bg-white p-4"><div class="flex items-center justify-between gap-3">';
+        foreach ($steps as $num => $item) {
+            $active = $num <= $step;
+            $html .= '<div class="flex items-center gap-3 '.($num < 3 ? 'flex-1' : '').'">'
+                .'<span class="grid h-9 w-9 place-items-center rounded-full '.($active ? 'bg-stone-950 text-white' : 'bg-stone-100 text-stone-400').' text-xs font-black">'.$num.'</span>'
+                .'<div class="min-w-0 '.($num < 3 ? 'flex-1' : '').'"><p class="text-[11px] font-black uppercase tracking-[0.14em] '.($active ? 'text-stone-900' : 'text-stone-400').'">'.htmlspecialchars($item['label']).'</p>'
+                .($num < 3 ? '<div class="mt-1 h-1.5 rounded-full '.($step > $num ? 'bg-stone-950' : 'bg-stone-100').'"></div>' : '')
+                .'</div></div>';
+        }
+        return $html.'</div></div>';
     }
 
     private function categoryIcon(string $category, string $class = 'h-5 w-5'): string
@@ -1472,6 +1505,7 @@ SQL;
         if ($kind !== '' && !isset($kinds[$kind])) {
             $kind = '';
         }
+        $step = $bookId > 0 ? 3 : ($kind !== '' ? 2 : 1);
 
         $picker = '';
         foreach ($kinds as $slug => $item) {
@@ -1482,7 +1516,7 @@ SQL;
         }
 
         if ($kind === '') {
-            $body = '<div class="space-y-5"><div class="rounded-3xl border border-stone-200 bg-white p-5"><p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">New booking</p><h2 class="mt-2 text-2xl font-black text-stone-950">What are you booking?</h2><p class="mt-2 text-sm leading-6 text-stone-500">Start here inside your portal. Pick the shoot type first and continue without using the public website flow.</p></div><div class="grid gap-3 sm:grid-cols-2">'.$picker.'</div></div>';
+            $body = '<div class="space-y-5">'.$this->clientBookingProgress(1).'<div class="rounded-3xl border border-stone-200 bg-white p-5"><p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">Step 1</p><h2 class="mt-2 text-2xl font-black text-stone-950">What are you booking?</h2><p class="mt-2 text-sm leading-6 text-stone-500">Start here inside your portal. Pick the shoot type first, then continue step by step.</p></div><div class="grid gap-3 sm:grid-cols-2">'.$picker.'</div></div>';
             $this->render('New booking', $this->clientShell('New booking', $body), ['portal' => 'client']);
             return;
         }
@@ -1494,27 +1528,35 @@ SQL;
 
         $cards = '';
         foreach ($packages as $package) {
-            $cards .= '<div class="rounded-3xl border border-stone-200 bg-white p-4"><div class="flex items-start gap-4"><img src="'.htmlspecialchars($this->packageCoverUrl($package)).'" alt="" class="h-20 w-20 rounded-2xl object-cover shrink-0"><div class="min-w-0 flex-1"><p class="text-lg font-black text-stone-950">'.htmlspecialchars((string)$package['name']).'</p><p class="mt-1 text-sm text-stone-500">'.htmlspecialchars((string)$package['description']).'</p><div class="mt-3 flex flex-wrap gap-2"><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.$this->money((float)$package['price']).'</span><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.(int)$package['turnaround_days'].' days</span></div><a href="'.$this->url('/client/new-booking?kind='.$kind.'&book='.(int)$package['id'].'#book').'" class="mt-4 inline-flex rounded-full bg-stone-950 px-4 py-2 text-sm font-bold text-white">Continue</a></div></div></div>';
+            $cards .= '<div class="rounded-3xl border border-stone-200 bg-white p-4"><div class="flex items-start gap-4"><img src="'.htmlspecialchars($this->packageCoverUrl($package)).'" alt="" class="h-20 w-20 rounded-2xl object-cover shrink-0"><div class="min-w-0 flex-1"><p class="text-lg font-black text-stone-950">'.htmlspecialchars((string)$package['name']).'</p><p class="mt-1 text-sm text-stone-500">'.htmlspecialchars((string)$package['description']).'</p><div class="mt-3 flex flex-wrap gap-2"><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.$this->money((float)$package['price']).'</span><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.htmlspecialchars($this->packageCoverageLabel($package)).'</span></div><a href="'.$this->url('/client/new-booking?kind='.$kind.'&book='.(int)$package['id'].'#book').'" class="mt-4 inline-flex rounded-full bg-stone-950 px-4 py-2 text-sm font-bold text-white">Continue</a></div></div></div>';
         }
         if ($cards === '') {
             $cards = $this->emptyState('No packages yet', 'No active packages are available for this booking type right now.');
         }
 
         $form = '';
+        $selectedCard = '';
         if ($bookId > 0) {
             $pick = $this->db->prepare("SELECT * FROM packages WHERE id=? AND active=1 AND category=? LIMIT 1");
             $pick->execute([$bookId, $selected['category']]);
             $package = $pick->fetch();
             if ($package) {
+                $selectedCard = '<div class="rounded-3xl border border-stone-200 bg-white p-5"><p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">Step 3</p><h2 class="mt-2 text-2xl font-black text-stone-950">Finish your booking</h2><div class="mt-4 flex items-start gap-4"><img src="'.htmlspecialchars($this->packageCoverUrl($package)).'" alt="" class="h-24 w-24 rounded-2xl object-cover shrink-0"><div><p class="text-lg font-black text-stone-950">'.htmlspecialchars((string)$package['name']).'</p><p class="mt-1 text-sm text-stone-500">'.htmlspecialchars((string)$package['description']).'</p><div class="mt-3 flex flex-wrap gap-2"><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.$this->money((float)$package['price']).'</span><span class="rounded-full bg-stone-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-stone-700">'.htmlspecialchars($this->packageCoverageLabel($package)).'</span></div></div></div></div>';
                 $form = '<div class="mt-5">'.$this->bookingForm($package, [
                     'portal' => true,
                     'fixed_event_type' => $selected['event_type'],
                     'cancel_href' => '/client/new-booking?kind='.$kind,
                 ]).'</div>';
+            } else {
+                $step = 2;
             }
         }
 
-        $body = '<div class="space-y-5"><div class="rounded-3xl border border-stone-200 bg-white p-5"><p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">Portal booking</p><h2 class="mt-2 text-2xl font-black text-stone-950">'.htmlspecialchars($selected['label']).'</h2><p class="mt-2 text-sm leading-6 text-stone-500">Choose a package below, then complete the booking right here in your client portal.</p></div><div class="grid gap-3 sm:grid-cols-2">'.$picker.'</div><div class="space-y-3">'.$cards.'</div>'.$form.'</div>';
+        if ($step === 2) {
+            $body = '<div class="space-y-5">'.$this->clientBookingProgress(2).'<div class="rounded-3xl border border-stone-200 bg-white p-5"><p class="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">Step 2</p><h2 class="mt-2 text-2xl font-black text-stone-950">Choose a package</h2><p class="mt-2 text-sm leading-6 text-stone-500">'.htmlspecialchars($selected['label']).' booking. Pick one package and continue.</p><a href="'.$this->url('/client/new-booking').'" class="mt-4 inline-flex text-sm font-bold text-stone-700">← Change booking type</a></div><div class="space-y-3">'.$cards.'</div></div>';
+        } else {
+            $body = '<div class="space-y-5">'.$this->clientBookingProgress(3).$selectedCard.$form.'<div class="rounded-3xl border border-stone-200 bg-white p-4"><a href="'.$this->url('/client/new-booking?kind='.$kind).'" class="text-sm font-bold text-stone-700">← Back to package list</a></div></div>';
+        }
         $this->render('New booking', $this->clientShell('New booking', $body), ['portal' => 'client']);
     }
 
